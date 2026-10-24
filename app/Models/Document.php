@@ -8,12 +8,17 @@ class Document extends Model
 {
     protected $fillable = [
         'employee_id',
-        'doc_name',
+        'employment_document_id',
         'file_path',
     ];
 
     public function employee()
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function employmentDocument()
+    {
+        return $this->belongsTo(EmploymentDocument::class);
     }
 }

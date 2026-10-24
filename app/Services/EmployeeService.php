@@ -3,12 +3,10 @@
 namespace App\Services;
 
 use App\Models\Employee;
-use App\Models\Role;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Throwable;
 
@@ -18,16 +16,8 @@ class EmployeeService
     {
         $storedFiles = [];
 
-        $roleId = Role::where('name', 'Employee')->value('id');
-
-        if (! $roleId) {
-            throw ValidationException::withMessages([
-                'employee.role' => 'The default Employee role is not configured.',
-            ]);
-        }
-
         try {
-            return DB::transaction(function () use ($data, $roleId, &$storedFiles) {
+            return DB::transaction(function () use ($data, &$storedFiles) {
                 $personal = $data['employee'];
                 $contact = $data['contact'];
                 $employment = $data['employment'];
@@ -36,7 +26,6 @@ class EmployeeService
                 $employee = Employee::create([
                     'emp_id' => $this->generateEmployeeId(),
                     'department_id' => $employment['department_id'],
-                    'role_id' => $roleId,
                     'firstname' => $personal['firstname'],
                     'lastname' => $personal['lastname'],
                     'middlename' => $personal['middlename'] ?? null,
@@ -94,12 +83,19 @@ class EmployeeService
 
                 // Upload Employee Documents
                 foreach ($data['documents'] ?? [] as $document) {
-                    $file = $document['file'];
-                    $path = $file->store("employees/{$employee->id}/documents", 'local');
-                    $storedFiles[] = $path;
+                    if (! filter_var($document['submitted'] ?? true, FILTER_VALIDATE_BOOLEAN)) {
+                        continue;
+                    }
+
+                    $path = null;
+
+                    if (($document['file'] ?? null) instanceof UploadedFile) {
+                        $path = $document['file']->store("employees/{$employee->id}/documents", 'local');
+                        $storedFiles[] = $path;
+                    }
 
                     $employee->documents()->create([
-                        'doc_name' => $document['doc_name'],
+                        'employment_document_id' => $document['employment_document_id'],
                         'file_path' => $path,
                     ]);
                 }
@@ -186,6 +182,51 @@ class EmployeeService
                         [],
                         $data['salary_setup']
                     );
+                }
+
+                // Synchronize Submitted Employment Documents
+                if (array_key_exists('documents', $data)) {
+                    $submittedDocuments = collect($data['documents'])
+                        ->filter(fn (array $document) => filter_var(
+                            $document['submitted'] ?? true,
+                            FILTER_VALIDATE_BOOLEAN
+                        ))
+                        ->keyBy('employment_document_id');
+                    $existingDocuments = $employee->documents()
+                        ->get()
+                        ->keyBy('employment_document_id');
+
+                    foreach ($existingDocuments as $employmentDocumentId => $existingDocument) {
+                        if ($submittedDocuments->has($employmentDocumentId)) {
+                            continue;
+                        }
+
+                        if ($existingDocument->file_path) {
+                            $filesToDelete[] = $existingDocument->file_path;
+                        }
+
+                        $existingDocument->delete();
+                    }
+
+                    foreach ($submittedDocuments as $employmentDocumentId => $document) {
+                        $existingDocument = $existingDocuments->get($employmentDocumentId);
+                        $values = [];
+
+                        if (($document['file'] ?? null) instanceof UploadedFile) {
+                            $path = $document['file']->store("employees/{$employee->id}/documents", 'local');
+                            $storedFiles[] = $path;
+                            $values['file_path'] = $path;
+
+                            if ($existingDocument?->file_path) {
+                                $filesToDelete[] = $existingDocument->file_path;
+                            }
+                        }
+
+                        $employee->documents()->updateOrCreate(
+                            ['employment_document_id' => $employmentDocumentId],
+                            $values
+                        );
+                    }
                 }
 
                 return $employee->fresh();

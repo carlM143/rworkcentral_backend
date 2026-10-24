@@ -67,8 +67,14 @@ class StoreEmployeeRequest extends FormRequest
 
             // Employee Documents
             'documents' => ['sometimes', 'array'],
-            'documents.*.doc_name' => ['required', 'string', 'max:255'],
-            'documents.*.file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
+            'documents.*.employment_document_id' => [
+                'required',
+                'integer',
+                'distinct',
+                Rule::exists('employment_documents', 'id'),
+            ],
+            'documents.*.submitted' => ['sometimes', 'boolean'],
+            'documents.*.file' => ['sometimes', 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ];
     }
 

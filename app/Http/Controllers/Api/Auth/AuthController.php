@@ -32,7 +32,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Login successful.',
             'data' => [
-                'user' => $user,
+                'user' => $user->load('role'),
                 'token' => $token,
                 'token_type' => 'Bearer',
             ],

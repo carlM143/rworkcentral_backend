@@ -52,6 +52,17 @@ class UpdateEmployeeRequest extends FormRequest
             'salary_setup.bank_name' => ['nullable', 'string', 'max:255'],
             'salary_setup.account_name' => ['nullable', 'string', 'max:255'],
             'salary_setup.account_number' => ['nullable', 'string', 'max:100'],
+
+            // Employee Documents
+            'documents' => ['sometimes', 'array'],
+            'documents.*.employment_document_id' => [
+                'required',
+                'integer',
+                'distinct',
+                Rule::exists('employment_documents', 'id'),
+            ],
+            'documents.*.submitted' => ['sometimes', 'boolean'],
+            'documents.*.file' => ['sometimes', 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ];
     }
 

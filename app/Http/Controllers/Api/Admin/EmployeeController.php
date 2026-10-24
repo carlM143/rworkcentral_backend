@@ -14,7 +14,7 @@ class EmployeeController extends Controller
 {
     private const LIST_RELATIONSHIPS = [
         'department',
-        'role',
+        'user.role',
         'contactInformation',
         'employments.employmentType',
         'employments.department',
@@ -25,7 +25,7 @@ class EmployeeController extends Controller
 
     private const DETAIL_RELATIONSHIPS = [
         'department',
-        'role',
+        'user.role',
         'contactInformation',
         'employments.employmentType',
         'employments.department',
@@ -47,7 +47,7 @@ class EmployeeController extends Controller
         'contactPersons',
 
         // Employee Documents
-        'documents',
+        'documents.employmentDocument',
     ];
 
     public function __construct(

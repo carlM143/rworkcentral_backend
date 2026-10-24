@@ -11,9 +11,11 @@ return new class extends Migration
         Schema::create('documents', function (Blueprint $table) {
             $table->id();
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
-            $table->string('doc_name');
+            $table->foreignId('employment_document_id')->constrained('employment_documents')->cascadeOnDelete();
             $table->string('file_path')->nullable();
             $table->timestamps();
+
+            $table->unique(['employee_id', 'employment_document_id']);
         });
     }
 

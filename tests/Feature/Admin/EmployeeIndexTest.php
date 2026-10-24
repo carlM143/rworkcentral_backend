@@ -36,10 +36,11 @@ class EmployeeIndexTest extends TestCase
         ]);
 
         $role = Role::create(['name' => 'Employee']);
+        $employeeUser = User::factory()->create(['role_id' => $role->id]);
 
         $employee = Employee::create([
+            'user_id' => $employeeUser->id,
             'department_id' => $department->id,
-            'role_id' => $role->id,
             'emp_id' => 12345678,
             'firstname' => 'Juan',
             'lastname' => 'Dela Cruz',
@@ -65,7 +66,7 @@ class EmployeeIndexTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $employee->id)
             ->assertJsonPath('data.0.department.department_code', 'IT')
-            ->assertJsonPath('data.0.role.name', 'Employee')
+            ->assertJsonPath('data.0.user.role.name', 'Employee')
             ->assertJsonPath('data.0.contact_information.email', 'juan@example.com')
             ->assertJsonStructure([
                 'data' => [

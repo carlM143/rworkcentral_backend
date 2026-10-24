@@ -3,14 +3,15 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Employee extends Model
 {
     protected $fillable = [
+        'user_id',
         'department_id',
         'emp_id',
-        'role_id',
         'firstname',
         'lastname',
         'middlename',
@@ -36,9 +37,9 @@ class Employee extends Model
         return $this->belongsTo(Department::class);
     }
 
-    public function role()
+    public function user(): BelongsTo
     {
-        return $this->belongsTo(Role::class);
+        return $this->belongsTo(User::class);
     }
 
     public function governmentRequirements()
@@ -100,6 +101,4 @@ class Employee extends Model
     {
         return $this->hasOne(SalarySetup::class);
     }
-
-
 }
