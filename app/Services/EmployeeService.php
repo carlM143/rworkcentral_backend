@@ -32,8 +32,8 @@ class EmployeeService
                     'suffix' => $personal['suffix'] ?? null,
                     'birthday' => $personal['birthday'],
                     'age' => Carbon::parse($personal['birthday'])->age,
-                    'gender' => $personal['gender'],
-                    'civil_status' => $personal['civil_status'],
+                    'gender' => $personal['gender'] ?? null,
+                    'civil_status' => $personal['civil_status'] ?? null,
                     'status' => true,
                 ]);
 
@@ -50,8 +50,8 @@ class EmployeeService
                 // Create Contact Information
                 $employee->contactInformation()->create([
                     'email' => $contact['email'],
-                    'mobile' => $contact['mobile'],
-                    'residential_address' => $contact['residential_address'] ?? null,
+                    'mobile' => $contact['mobile'] ?? null,
+                    'residential_address' => $contact['residential_address'],
                 ]);
 
                 // Create Employment Information
@@ -59,11 +59,11 @@ class EmployeeService
                     'employment_type_id' => $employment['employment_type_id'],
                     'department_id' => $employment['department_id'],
                     'position_id' => $employment['position_id'],
-                    'work_schedule_id' => $employment['work_schedule_id'],
-                    'restday_id' => $employment['restday_id'],
+                    'work_schedule_id' => $employment['work_schedule_id'] ?? null,
+                    'restday_id' => $employment['restday_id'] ?? null,
                     'date_hired' => $employment['date_hired'],
-                    'mobile' => $contact['mobile'],
-                    'residential_address' => $contact['residential_address'] ?? null,
+                    'mobile' => $contact['mobile'] ?? null,
+                    'residential_address' => $contact['residential_address'],
                 ]);
 
                 // Create Government Requirements

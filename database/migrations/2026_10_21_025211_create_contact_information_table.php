@@ -12,8 +12,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
             $table->string('email');
-            $table->string('mobile');
-            $table->string('residential_address')->nullable();
+            $table->string('mobile')->nullable();
+            $table->string('residential_address');
             $table->timestamps();
         });
     }

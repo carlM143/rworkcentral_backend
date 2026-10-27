@@ -110,4 +110,8 @@ class User extends Authenticatable
     {
         return $this->hasMany(Holiday::class);
     }
+    public function createdLeaveCreditTransactions()
+    {
+        return $this->hasMany(LeaveCreditTransaction::class, 'created_by');
+    }
 }

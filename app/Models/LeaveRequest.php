@@ -13,12 +13,15 @@ class LeaveRequest extends Model
         'leave_policy_id',
         'request_no',
         'request_date',
+        'requested_pay_type',
+        'approved_pay_type',
         'reason',
         'approved_by',
         'approved_at',
         'file_path',
         'status',
     ];
+
 
     protected function casts(): array
     {
@@ -61,5 +64,10 @@ class LeaveRequest extends Model
     public function leaveDates()
     {
         return $this->hasMany(LeaveRequestDate::class);
+    }
+
+    public function leaveCreditTransactions()
+    {
+        return $this->hasMany(LeaveCreditTransaction::class);
     }
 }

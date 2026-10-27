@@ -22,38 +22,38 @@ class UpdateEmployeeRequest extends FormRequest
             'employee' => ['sometimes', 'array'],
             'employee.firstname' => ['sometimes', 'required', 'string', 'max:100'],
             'employee.lastname' => ['sometimes', 'required', 'string', 'max:100'],
-            'employee.middlename' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'employee.suffix' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'employee.middlename' => ['nullable', 'string', 'max:100'],
+            'employee.suffix' => ['nullable', 'string', 'max:20'],
             'employee.birthday' => ['sometimes', 'required', 'date', 'before:today'],
-            'employee.gender' => ['sometimes', 'required', Rule::in(['Male', 'Female'])],
-            'employee.civil_status' => ['sometimes', 'required', Rule::in(['Single', 'Married', 'Widowed', 'Separated', 'Annulled'])],
-            'employee.profile_photo' => ['sometimes', 'nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'employee.gender' => ['nullable', Rule::in(['Male', 'Female'])],
+            'employee.civil_status' => ['nullable', Rule::in(['Single', 'Married', 'Widowed', 'Separated', 'Annulled'])],
+            'employee.profile_photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
 
             // Contact Information
             'contact' => ['sometimes', 'array'],
             'contact.email' => ['sometimes', 'required', 'email', 'max:255'],
-            'contact.mobile' => ['sometimes', 'required', 'string', 'max:30'],
-            'contact.residential_address' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'contact.mobile' => ['nullable', 'string', 'max:30'],
+            'contact.residential_address' => ['sometimes', 'required', 'string', 'max:255'],
 
             // Employment Information
             'employment' => ['sometimes', 'array'],
             'employment.employment_type_id' => ['sometimes', 'required', 'integer', Rule::exists('employment_types', 'id')],
             'employment.department_id' => ['sometimes', 'required', 'integer', Rule::exists('departments', 'id')],
             'employment.position_id' => ['sometimes', 'required', 'integer', Rule::exists('positions', 'id')],
-            'employment.work_schedule_id' => ['sometimes', 'required', 'integer', Rule::exists('work_schedules', 'id')],
-            'employment.restday_id' => ['sometimes', 'required', 'integer', Rule::exists('rest_days', 'id')],
+            'employment.work_schedule_id' => ['nullable', 'integer', Rule::exists('work_schedules', 'id')],
+            'employment.restday_id' => ['nullable', 'integer', Rule::exists('rest_days', 'id')],
             'employment.date_hired' => ['sometimes', 'required', 'date'],
 
-            // Employee Salary Setup
+            // Salary Setup - Optional
             'salary_setup' => ['sometimes', 'array'],
-            'salary_setup.salary_type_id' => ['required_with:salary_setup', 'integer', Rule::exists('salary_types', 'id')],
+            'salary_setup.salary_type_id' => ['nullable', 'integer', Rule::exists('salary_types', 'id')],
             'salary_setup.basic_salary' => ['nullable', 'numeric', 'gt:0'],
             'salary_setup.allowance' => ['nullable', 'numeric', 'min:0'],
             'salary_setup.bank_name' => ['nullable', 'string', 'max:255'],
             'salary_setup.account_name' => ['nullable', 'string', 'max:255'],
             'salary_setup.account_number' => ['nullable', 'string', 'max:100'],
 
-            // Employee Documents
+            // Employee Documents - Optional
             'documents' => ['sometimes', 'array'],
             'documents.*.employment_document_id' => [
                 'required',
@@ -96,7 +96,7 @@ class UpdateEmployeeRequest extends FormRequest
                     );
                 }
 
-                // Validate position matches department
+                // Validate position belongs to selected department
                 if (($this->filled('employment.department_id') || $this->filled('employment.position_id'))
                     && ! Position::whereKey($positionId)
                         ->where('department_id', $departmentId)

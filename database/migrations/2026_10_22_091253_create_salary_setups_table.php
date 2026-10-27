@@ -1,4 +1,3 @@
-
 <?php
 
 use Illuminate\Database\Migrations\Migration;
@@ -12,7 +11,7 @@ return new class extends Migration
         Schema::create('salary_setups', function (Blueprint $table) {
             $table->id();
             $table->foreignId('employee_id')->unique()->constrained('employees')->restrictOnDelete();
-            $table->foreignId('salary_type_id')->constrained('salary_types')->restrictOnDelete();
+            $table->foreignId('salary_type_id')->nullable()->constrained('salary_types')->restrictOnDelete();
             $table->decimal('basic_salary', 12, 2)->nullable();
             $table->decimal('allowance', 12, 2)->nullable();
             $table->string('bank_name')->nullable();

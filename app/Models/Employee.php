@@ -101,4 +101,9 @@ class Employee extends Model
     {
         return $this->hasOne(SalarySetup::class);
     }
+
+    public function leaveCreditTransactions()
+    {
+        return $this->hasMany(LeaveCreditTransaction::class);
+    }
 }

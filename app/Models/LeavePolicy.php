@@ -51,4 +51,9 @@ class LeavePolicy extends Model
     {
         return $this->hasMany(LeaveRequest::class);
     }
+
+    public function leaveCreditTransactions()
+    {
+        return $this->hasMany(LeaveCreditTransaction::class);
+    }
 }

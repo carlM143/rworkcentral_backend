@@ -18,10 +18,10 @@ return new class extends Migration
             $table->string('middlename')->nullable();
             $table->string('suffix')->nullable();
             $table->string('profile_photo')->nullable();
-            $table->integer('age');
-            $table->string('gender');
+            $table->integer('age')->nullable();
+            $table->string('gender')->nullable();
             $table->date('birthday');
-            $table->enum('civil_status', ['Single', 'Married', 'Widowed', 'Separated', 'Annulled']);
+            $table->enum('civil_status', ['Single', 'Married', 'Widowed', 'Separated', 'Annulled'])->nullable();
             $table->boolean('status')->default(true);
             $table->timestamps();
         });

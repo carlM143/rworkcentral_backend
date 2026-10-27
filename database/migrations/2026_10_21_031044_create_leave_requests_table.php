@@ -16,6 +16,8 @@ return new class extends Migration
             $table->foreignId('leave_policy_id')->constrained('leave_policies')->restrictOnDelete();
             $table->string('request_no')->unique();
             $table->date('request_date');
+            $table->enum('requested_pay_type', ['paid', 'unpaid']);
+            $table->enum('approved_pay_type', ['paid', 'unpaid'])->nullable();
             $table->text('reason')->nullable();
             $table->foreignId('approved_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('approved_at')->nullable();
