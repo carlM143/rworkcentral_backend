@@ -25,6 +25,7 @@ class StoreOvertimeRequest extends FormRequest
             'work_schedule_id' => ['nullable', 'integer', 'exists:work_schedules,id'],
             'file_path' => ['nullable', 'string', 'max:500'],
             'image' => ['nullable'],
+            'remove_image' => ['nullable'],
             'file' => ['nullable'],
         ];
     }

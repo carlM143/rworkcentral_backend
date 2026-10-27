@@ -153,9 +153,19 @@ class UndertimeRequestController extends Controller
             $undertimeRequest->reason = $validated['reason'];
         }
 
-        $filePath = $this->handleFileUpload($request, $employee->id);
-        if ($filePath) {
-            $undertimeRequest->file_path = $filePath;
+        if ($request->boolean('remove_image') || ($request->has('image') && is_null($request->input('image')) && ! $request->hasFile('file') && ! $request->hasFile('image'))) {
+            if ($undertimeRequest->file_path && Storage::disk('public')->exists($undertimeRequest->file_path)) {
+                Storage::disk('public')->delete($undertimeRequest->file_path);
+            }
+            $undertimeRequest->file_path = null;
+        } else {
+            $filePath = $this->handleFileUpload($request, $employee->id);
+            if ($filePath) {
+                if ($undertimeRequest->file_path && $undertimeRequest->file_path !== $filePath && Storage::disk('public')->exists($undertimeRequest->file_path)) {
+                    Storage::disk('public')->delete($undertimeRequest->file_path);
+                }
+                $undertimeRequest->file_path = $filePath;
+            }
         }
 
         $undertimeRequest->save();

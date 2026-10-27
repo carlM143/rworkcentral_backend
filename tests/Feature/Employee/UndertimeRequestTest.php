@@ -10,6 +10,7 @@ use App\Models\ScheduleType;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -169,5 +170,45 @@ class UndertimeRequestTest extends TestCase
             ->assertJsonPath('data.reason', 'Updated UT reason');
 
         $this->assertEquals('Updated UT reason', $ut->fresh()->reason);
+    }
+
+    public function test_employee_can_remove_image_when_updating_undertime_request(): void
+    {
+        Storage::fake('public');
+
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $fakePath = "requests/{$employee->id}/ut_proof.jpg";
+        Storage::disk('public')->put($fakePath, 'dummy-ut-proof');
+
+        $ut = $employee->undertimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'UT-TEST-IMG-001',
+            'undertime_date' => now()->toDateString(),
+            'requested_time_out' => now()->setTime(15, 0, 0),
+            'scheduled_time_out' => now()->setTime(17, 0, 0),
+            'requested_minutes' => 120,
+            'file_path' => $fakePath,
+            'reason' => 'Doctor appointment',
+            'status' => 'pending',
+        ]);
+
+        $this->assertTrue(Storage::disk('public')->exists($fakePath));
+
+        $response = $this->putJson("/api/employee/undertime-requests/{$ut->id}", [
+            'reason' => 'Removed UT image',
+            'remove_image' => true,
+            'image' => null,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.file_path', null)
+            ->assertJsonPath('data.image', null);
+
+        $ut->refresh();
+        $this->assertNull($ut->file_path);
+        $this->assertFalse(Storage::disk('public')->exists($fakePath));
     }
 }

@@ -135,11 +135,12 @@ class LeaveRequestController extends Controller
                 $rawDayType = is_array($date) ? ($date['day_type'] ?? 'whole_day') : 'whole_day';
                 $dayType = in_array($rawDayType, ['whole_day', 'half_day']) ? $rawDayType : ($rawDayType === 'half' ? 'half_day' : 'whole_day');
                 $leaveDate = is_array($date) ? ($date['leave_date'] ?? $date['date'] ?? $requestDate) : $date;
+                $dayValue = (float) (is_array($date) ? ($date['day_value'] ?? ($dayType === 'half_day' ? 0.5 : 1.0)) : 1.0);
                 $leaveRequest->leaveDates()->firstOrCreate(
                     ['leave_date' => $leaveDate],
                     [
                         'day_type' => $dayType,
-                        'day_value' => is_array($date) ? ($date['day_value'] ?? ($dayType === 'half_day' ? 0.5 : 1.0)) : 1.0,
+                        'day_value' => $dayValue,
                     ]
                 );
             }
@@ -199,34 +200,61 @@ class LeaveRequestController extends Controller
             }
         }
 
+        if (! empty($validated['request_date'])) {
+            $leaveRequest->request_date = $validated['request_date'];
+        }
+
         if (array_key_exists('reason', $validated)) {
             $leaveRequest->reason = $validated['reason'];
         }
 
-        $filePath = $this->handleFileUpload($request, $employee->id);
-        if ($filePath) {
-            $leaveRequest->file_path = $filePath;
+        if ($request->boolean('remove_image') || ($request->has('image') && is_null($request->input('image')) && ! $request->hasFile('file') && ! $request->hasFile('image'))) {
+            if ($leaveRequest->file_path && Storage::disk('public')->exists($leaveRequest->file_path)) {
+                Storage::disk('public')->delete($leaveRequest->file_path);
+            }
+            $leaveRequest->file_path = null;
+        } else {
+            $filePath = $this->handleFileUpload($request, $employee->id);
+            if ($filePath) {
+                if ($leaveRequest->file_path && $leaveRequest->file_path !== $filePath && Storage::disk('public')->exists($leaveRequest->file_path)) {
+                    Storage::disk('public')->delete($leaveRequest->file_path);
+                }
+                $leaveRequest->file_path = $filePath;
+            }
         }
 
         $leaveRequest->save();
 
-        $startDate = $validated['start_date'] ?? $validated['start'] ?? null;
-        $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
-        if ($startDate) {
+        if (! empty($validated['dates']) && is_array($validated['dates'])) {
             $leaveRequest->leaveDates()->delete();
-            $start = Carbon::parse($startDate);
-            $end = Carbon::parse($endDate);
-            if ($end->lt($start)) {
-                $end = $start->copy();
+            foreach ($validated['dates'] as $date) {
+                $rawDayType = is_array($date) ? ($date['day_type'] ?? 'whole_day') : 'whole_day';
+                $dayType = in_array($rawDayType, ['whole_day', 'half_day']) ? $rawDayType : ($rawDayType === 'half' ? 'half_day' : 'whole_day');
+                $leaveDate = is_array($date) ? ($date['leave_date'] ?? $date['date'] ?? now()->toDateString()) : $date;
+                $dayValue = (float) (is_array($date) ? ($date['day_value'] ?? ($dayType === 'half_day' ? 0.5 : 1.0)) : 1.0);
+                $leaveRequest->leaveDates()->create([
+                    'leave_date' => $leaveDate,
+                    'day_type' => $dayType,
+                    'day_value' => $dayValue,
+                ]);
             }
-            for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
-                $leaveRequest->leaveDates()->firstOrCreate(
-                    ['leave_date' => $d->toDateString()],
-                    [
+        } else {
+            $startDate = $validated['start_date'] ?? $validated['start'] ?? null;
+            $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
+            if ($startDate) {
+                $leaveRequest->leaveDates()->delete();
+                $start = Carbon::parse($startDate);
+                $end = Carbon::parse($endDate);
+                if ($end->lt($start)) {
+                    $end = $start->copy();
+                }
+                for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
+                    $leaveRequest->leaveDates()->create([
+                        'leave_date' => $d->toDateString(),
                         'day_type' => 'whole_day',
                         'day_value' => 1.0,
-                    ]
-                );
+                    ]);
+                }
             }
         }
 
@@ -290,6 +318,7 @@ class LeaveRequestController extends Controller
             'type' => $request->leaveType?->leave_name ?? 'Vacation Leave',
             'leave_type_id' => $request->leave_type_id,
             'leave_policy_id' => $request->leave_policy_id,
+            'request_date' => is_string($request->request_date) ? substr($request->request_date, 0, 10) : $request->request_date?->format('Y-m-d'),
             'start' => $firstDate ?: now()->toDateString(),
             'end' => $lastDate ?: ($firstDate ?: now()->toDateString()),
             'reason' => $request->reason ?? '',
@@ -307,6 +336,7 @@ class LeaveRequestController extends Controller
                 'day_type' => $d->day_type,
                 'day_value' => (float) $d->day_value,
             ])->values()->all(),
+            'total_days' => (float) $dates->sum('day_value'),
             'created_at' => $request->created_at?->toIso8601String(),
         ];
     }

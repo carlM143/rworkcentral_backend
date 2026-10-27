@@ -10,6 +10,7 @@ use App\Models\ScheduleType;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -164,5 +165,44 @@ class OvertimeRequestTest extends TestCase
             ->assertJsonPath('data.reason', 'Updated OT reason');
 
         $this->assertEquals('Updated OT reason', $ot->fresh()->reason);
+    }
+
+    public function test_employee_can_remove_image_when_updating_overtime_request(): void
+    {
+        Storage::fake('public');
+
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $fakePath = "requests/{$employee->id}/ot_proof.jpg";
+        Storage::disk('public')->put($fakePath, 'dummy-ot-proof');
+
+        $ot = $employee->overtimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'OT-TEST-IMG-001',
+            'ot_date' => now()->toDateString(),
+            'start_at' => now()->setTime(17, 0, 0),
+            'end_at' => now()->setTime(19, 0, 0),
+            'file_path' => $fakePath,
+            'reason' => 'OT with photo',
+            'status' => 'pending',
+        ]);
+
+        $this->assertTrue(Storage::disk('public')->exists($fakePath));
+
+        $response = $this->putJson("/api/employee/overtime-requests/{$ot->id}", [
+            'reason' => 'Removed OT image',
+            'remove_image' => true,
+            'image' => null,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.file_path', null)
+            ->assertJsonPath('data.image', null);
+
+        $ot->refresh();
+        $this->assertNull($ot->file_path);
+        $this->assertFalse(Storage::disk('public')->exists($fakePath));
     }
 }

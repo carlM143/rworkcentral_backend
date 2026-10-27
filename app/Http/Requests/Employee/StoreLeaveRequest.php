@@ -24,8 +24,10 @@ class StoreLeaveRequest extends FormRequest
             'end' => ['nullable', 'date'],
             'reason' => ['nullable', 'string', 'max:1000'],
             'dates' => ['nullable', 'array'],
+            'dates.*' => ['nullable'],
             'file_path' => ['nullable', 'string', 'max:500'],
             'image' => ['nullable'],
+            'remove_image' => ['nullable'],
             'file' => ['nullable'],
         ];
     }

@@ -59,12 +59,6 @@ class LeaveTypeSeeder extends Seeder
                 'annual_credits' => 7,
                 'is_paid' => true,
             ],
-            [
-                'leave_code' => 'UL',
-                'leave_name' => 'Unpaid Leave',
-                'annual_credits' => 0,
-                'is_paid' => false,
-            ],
         ];
 
         foreach ($leaveTypes as $item) {

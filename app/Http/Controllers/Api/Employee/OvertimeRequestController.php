@@ -143,9 +143,19 @@ class OvertimeRequestController extends Controller
             $overtimeRequest->reason = $validated['reason'];
         }
 
-        $filePath = $this->handleFileUpload($request, $employee->id);
-        if ($filePath) {
-            $overtimeRequest->file_path = $filePath;
+        if ($request->boolean('remove_image') || ($request->has('image') && is_null($request->input('image')) && ! $request->hasFile('file') && ! $request->hasFile('image'))) {
+            if ($overtimeRequest->file_path && Storage::disk('public')->exists($overtimeRequest->file_path)) {
+                Storage::disk('public')->delete($overtimeRequest->file_path);
+            }
+            $overtimeRequest->file_path = null;
+        } else {
+            $filePath = $this->handleFileUpload($request, $employee->id);
+            if ($filePath) {
+                if ($overtimeRequest->file_path && $overtimeRequest->file_path !== $filePath && Storage::disk('public')->exists($overtimeRequest->file_path)) {
+                    Storage::disk('public')->delete($overtimeRequest->file_path);
+                }
+                $overtimeRequest->file_path = $filePath;
+            }
         }
 
         $overtimeRequest->save();
