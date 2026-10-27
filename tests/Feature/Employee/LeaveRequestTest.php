@@ -141,4 +141,51 @@ class LeaveRequestTest extends TestCase
 
         $this->assertEquals('cancelled', $leaveRequest->fresh()->status);
     }
+
+    public function test_employee_can_list_leave_requests(): void
+    {
+        [$user, $employee, $leaveType, $leavePolicy] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $employee->leaveRequests()->create([
+            'leave_type_id' => $leaveType->id,
+            'leave_policy_id' => $leavePolicy->id,
+            'request_no' => 'LR-TEST-002',
+            'request_date' => now()->toDateString(),
+            'reason' => 'Annual leave',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->getJson('/api/employee/leave-requests');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', 'Vacation Leave');
+    }
+
+    public function test_employee_can_update_pending_leave_request(): void
+    {
+        [$user, $employee, $leaveType, $leavePolicy] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $leaveRequest = $employee->leaveRequests()->create([
+            'leave_type_id' => $leaveType->id,
+            'leave_policy_id' => $leavePolicy->id,
+            'request_no' => 'LR-TEST-003',
+            'request_date' => now()->addDays(2)->toDateString(),
+            'reason' => 'Initial reason',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->putJson("/api/employee/leave-requests/{$leaveRequest->id}", [
+            'reason' => 'Updated reason for vacation',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.reason', 'Updated reason for vacation');
+
+        $this->assertEquals('Updated reason for vacation', $leaveRequest->fresh()->reason);
+    }
 }

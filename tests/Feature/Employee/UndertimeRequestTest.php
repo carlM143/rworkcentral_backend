@@ -119,4 +119,55 @@ class UndertimeRequestTest extends TestCase
 
         $this->assertEquals('cancelled', $ut->fresh()->status);
     }
+
+    public function test_employee_can_list_undertime_requests(): void
+    {
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $employee->undertimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'UT-TEST-002',
+            'undertime_date' => now()->toDateString(),
+            'requested_time_out' => now()->setTime(15, 0, 0),
+            'scheduled_time_out' => now()->setTime(17, 0, 0),
+            'requested_minutes' => 120,
+            'reason' => 'Bank transaction',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->getJson('/api/employee/undertime-requests');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', 'Undertime');
+    }
+
+    public function test_employee_can_update_pending_undertime_request(): void
+    {
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $ut = $employee->undertimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'UT-TEST-003',
+            'undertime_date' => now()->toDateString(),
+            'requested_time_out' => now()->setTime(15, 0, 0),
+            'scheduled_time_out' => now()->setTime(17, 0, 0),
+            'requested_minutes' => 120,
+            'reason' => 'Initial UT reason',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->putJson("/api/employee/undertime-requests/{$ut->id}", [
+            'reason' => 'Updated UT reason',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.reason', 'Updated UT reason');
+
+        $this->assertEquals('Updated UT reason', $ut->fresh()->reason);
+    }
 }

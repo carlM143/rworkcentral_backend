@@ -14,12 +14,18 @@ class StoreOvertimeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'ot_date' => ['required', 'date'],
-            'start_at' => ['required', 'date'],
-            'end_at' => ['required', 'date', 'after:start_at'],
+            'ot_date' => ['nullable', 'date'],
+            'start' => ['nullable', 'date'],
+            'start_at' => ['nullable'],
+            'end_at' => ['nullable'],
+            'start_time' => ['nullable', 'string'],
+            'end_time' => ['nullable', 'string'],
+            'ends_next_day' => ['nullable', 'boolean'],
             'reason' => ['nullable', 'string', 'max:1000'],
             'work_schedule_id' => ['nullable', 'integer', 'exists:work_schedules,id'],
             'file_path' => ['nullable', 'string', 'max:500'],
+            'image' => ['nullable'],
+            'file' => ['nullable'],
         ];
     }
 }

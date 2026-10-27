@@ -20,16 +20,19 @@ Route::post('/profile/password', [EmployeeProfileController::class, 'updatePassw
 Route::get('/leave-types', [LeaveRequestController::class, 'types']);
 Route::get('/leave-requests', [LeaveRequestController::class, 'index']);
 Route::post('/leave-requests', [LeaveRequestController::class, 'store']);
+Route::match(['put', 'patch'], '/leave-requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
 Route::patch('/leave-requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
 
 // Overtime Requests
 Route::get('/overtime-requests', [OvertimeRequestController::class, 'index']);
 Route::post('/overtime-requests', [OvertimeRequestController::class, 'store']);
+Route::match(['put', 'patch'], '/overtime-requests/{overtimeRequest}', [OvertimeRequestController::class, 'update']);
 Route::patch('/overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
 
 // Undertime Requests
 Route::get('/undertime-requests', [UndertimeRequestController::class, 'index']);
 Route::post('/undertime-requests', [UndertimeRequestController::class, 'store']);
+Route::match(['put', 'patch'], '/undertime-requests/{undertimeRequest}', [UndertimeRequestController::class, 'update']);
 Route::patch('/undertime-requests/{undertimeRequest}/cancel', [UndertimeRequestController::class, 'cancel']);
 
 // Attendance & Time Logs

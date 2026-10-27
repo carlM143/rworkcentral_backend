@@ -116,4 +116,53 @@ class OvertimeRequestTest extends TestCase
 
         $this->assertEquals('cancelled', $ot->fresh()->status);
     }
+
+    public function test_employee_can_list_overtime_requests(): void
+    {
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $employee->overtimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'OT-TEST-002',
+            'ot_date' => now()->toDateString(),
+            'start_at' => now()->setTime(17, 0, 0),
+            'end_at' => now()->setTime(20, 0, 0),
+            'reason' => 'Inventory count',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->getJson('/api/employee/overtime-requests');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', 'Overtime');
+    }
+
+    public function test_employee_can_update_pending_overtime_request(): void
+    {
+        [$user, $employee, $workSchedule] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $ot = $employee->overtimeRequests()->create([
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'OT-TEST-003',
+            'ot_date' => now()->toDateString(),
+            'start_at' => now()->setTime(17, 0, 0),
+            'end_at' => now()->setTime(19, 0, 0),
+            'reason' => 'Initial OT',
+            'status' => 'pending',
+        ]);
+
+        $response = $this->putJson("/api/employee/overtime-requests/{$ot->id}", [
+            'reason' => 'Updated OT reason',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.reason', 'Updated OT reason');
+
+        $this->assertEquals('Updated OT reason', $ot->fresh()->reason);
+    }
 }
