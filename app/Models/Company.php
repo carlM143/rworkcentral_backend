@@ -46,4 +46,8 @@ class Company extends Model
     {
         return $this->hasMany(HolidayCompany::class);
     }
+    public function contributionDeductionSettings()
+    {
+        return $this->hasMany(ContributionDeductionSetting::class);
+    }
 }

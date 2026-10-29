@@ -106,4 +106,13 @@ class Employee extends Model
     {
         return $this->hasMany(LeaveCreditTransaction::class);
     }
+
+    public function loans()
+    {
+        return $this->hasMany(EmployeeLoan::class);
+    }
+    public function payrollContributions()
+    {
+        return $this->hasMany(PayrollContribution::class);
+    }
 }

@@ -10,14 +10,36 @@ return new class extends Migration
     {
         Schema::create('payroll_periods', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
-            $table->foreignId('company_id')->constrained('companies')->restrictOnDelete();
+
+            $table->foreignId('user_id')
+                ->constrained('users')
+                ->restrictOnDelete();
+
+            $table->foreignId('company_id')
+                ->constrained('companies')
+                ->restrictOnDelete();
+
+            $table->unsignedTinyInteger('cutoff_number');
+
             $table->string('period_name');
             $table->date('cutoff_start');
             $table->date('cutoff_end');
             $table->date('payment_date');
-            $table->enum('status', ['draft', 'open', 'processing', 'completed', 'cancelled'])->default('draft');
+
+            $table->enum('status', [
+                'draft',
+                'open',
+                'processing',
+                'completed',
+                'cancelled',
+            ])->default('draft');
+
             $table->timestamps();
+
+            $table->index([
+                'company_id',
+                'cutoff_number',
+            ], 'payroll_period_company_cutoff_idx');
         });
     }
 

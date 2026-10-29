@@ -50,4 +50,14 @@ class Payroll extends Model
     {
         return $this->belongsTo(SalaryType::class, 'salary_type_id');
     }
+
+    public function loanTransactions()
+    {
+        return $this->hasMany(EmployeeLoanTransaction::class);
+    }
+
+    public function contributions()
+    {
+        return $this->hasMany(PayrollContribution::class);
+    }
 }

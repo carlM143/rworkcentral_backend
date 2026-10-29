@@ -114,4 +114,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(LeaveCreditTransaction::class, 'created_by');
     }
+
+    public function createdEmployeeLoans()
+    {
+        return $this->hasMany(EmployeeLoan::class, 'created_by');
+    }
+
+    public function createdLoanTransactions()
+    {
+        return $this->hasMany(EmployeeLoanTransaction::class, 'created_by');
+    }
 }

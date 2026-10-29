@@ -9,6 +9,7 @@ class PayrollPeriod extends Model
     protected $fillable = [
         'user_id',
         'company_id',
+        'cutoff_number',
         'period_name',
         'cutoff_start',
         'cutoff_end',
@@ -19,6 +20,7 @@ class PayrollPeriod extends Model
     protected function casts(): array
     {
         return [
+            'cutoff_number' => 'integer',
             'cutoff_start' => 'date',
             'cutoff_end' => 'date',
             'payment_date' => 'date',

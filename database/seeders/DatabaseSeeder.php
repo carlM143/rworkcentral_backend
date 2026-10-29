@@ -27,6 +27,9 @@ class DatabaseSeeder extends Seeder
             PayrollGroupSeeder::class,
             PayrollPeriodSeeder::class,
             WorkScheduleSeeder::class,
+
+            LoanTypeSeeder::class,
+            ContributionTypeSeeder::class,
         ]);
     }
 }

@@ -36,6 +36,7 @@ class PayrollPeriodController extends Controller
     {
         return [
             'period_name' => ['required', 'string', 'max:255'],
+            'cutoff_number' => ['required', 'integer', 'in:1,2'],
             'cutoff_start' => ['required', 'date'],
             'cutoff_end' => ['required', 'date', 'after_or_equal:cutoff_start'],
             'payment_date' => ['required', 'date', 'after_or_equal:cutoff_end'],
@@ -55,6 +56,7 @@ class PayrollPeriodController extends Controller
                 'company_id' => $period->company_id,
                 'label' => $period->period_name ?? "Payroll Period #{$period->id}",
                 'period_name' => $period->period_name,
+                'cutoff_number' => (int) $period->cutoff_number,
                 'cutoff_start' => $period->cutoff_start?->format('Y-m-d'),
                 'cutoff_end' => $period->cutoff_end?->format('Y-m-d'),
                 'payment_date' => $period->payment_date?->format('Y-m-d'),
@@ -77,13 +79,13 @@ class PayrollPeriodController extends Controller
             ...$data,
             'user_id' => $request->user()->id,
             'company_id' => $this->companyId($request),
-            'status' => 'Draft',
+            'status' => 'draft',
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Payroll period created successfully.',
-            'data' => $payrollPeriod,
+            'data' => $payrollPeriod->fresh(),
         ], 201);
     }
 
@@ -99,18 +101,18 @@ class PayrollPeriodController extends Controller
         ]);
     }
 
-    // PATCH /api/admin/payroll-periods/{payrollPeriod}
+    // PUT/PATCH /api/admin/payroll-periods/{payrollPeriod}
     public function update(Request $request, PayrollPeriod $payrollPeriod): JsonResponse
     {
         $this->authorizePeriod($request, $payrollPeriod);
 
-        $data = $request->validate($this->rules());
-
-        if (strtolower(trim((string) $payrollPeriod->status)) !== 'draft') {
+        if ($payrollPeriod->status !== 'draft') {
             throw ValidationException::withMessages([
                 'status' => 'Only draft payroll periods can be edited.',
             ]);
         }
+
+        $data = $request->validate($this->rules());
 
         $payrollPeriod->update($data);
 
@@ -132,7 +134,7 @@ class PayrollPeriodController extends Controller
             ]);
         }
 
-        if (strtolower(trim((string) $payrollPeriod->status)) !== 'draft') {
+        if ($payrollPeriod->status !== 'draft') {
             throw ValidationException::withMessages([
                 'status' => 'Only draft payroll periods can be deleted.',
             ]);
@@ -145,5 +147,4 @@ class PayrollPeriodController extends Controller
             'message' => 'Payroll period deleted successfully.',
         ]);
     }
-
 }
