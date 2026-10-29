@@ -25,6 +25,7 @@ class DatabaseSeeder extends Seeder
             EmploymentDocumentSeeder::class,
             LeaveTypeSeeder::class,
             SalaryTypeSeeder::class,
+            LeaveTypeSeeder::class,
             PayrollGroupSeeder::class,
             PayrollPeriodSeeder::class,
             WorkScheduleSeeder::class,
