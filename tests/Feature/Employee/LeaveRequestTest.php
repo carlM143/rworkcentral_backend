@@ -131,6 +131,7 @@ class LeaveRequestTest extends TestCase
             'leave_policy_id' => $leavePolicy->id,
             'request_no' => 'LR-TEST-001',
             'request_date' => now()->addDays(3)->toDateString(),
+            'requested_pay_type' => 'paid',
             'reason' => 'Personal matter',
             'status' => 'pending',
         ]);
@@ -154,6 +155,7 @@ class LeaveRequestTest extends TestCase
             'leave_policy_id' => $leavePolicy->id,
             'request_no' => 'LR-TEST-002',
             'request_date' => now()->toDateString(),
+            'requested_pay_type' => 'paid',
             'reason' => 'Annual leave',
             'status' => 'pending',
         ]);
@@ -176,6 +178,7 @@ class LeaveRequestTest extends TestCase
             'leave_policy_id' => $leavePolicy->id,
             'request_no' => 'LR-TEST-003',
             'request_date' => now()->addDays(2)->toDateString(),
+            'requested_pay_type' => 'paid',
             'reason' => 'Initial reason',
             'status' => 'pending',
         ]);
@@ -237,6 +240,7 @@ class LeaveRequestTest extends TestCase
             'leave_policy_id' => $leavePolicy->id,
             'request_no' => 'LR-TEST-004',
             'request_date' => now()->addDays(3)->toDateString(),
+            'requested_pay_type' => 'paid',
             'reason' => 'Original',
             'status' => 'pending',
         ]);
@@ -286,6 +290,7 @@ class LeaveRequestTest extends TestCase
             'leave_policy_id' => $leavePolicy->id,
             'request_no' => 'LR-TEST-IMG-001',
             'request_date' => now()->toDateString(),
+            'requested_pay_type' => 'paid',
             'file_path' => $fakePath,
             'reason' => 'With image',
             'status' => 'pending',

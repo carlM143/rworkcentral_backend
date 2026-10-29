@@ -72,7 +72,7 @@ class EmployeeIndexTest extends TestCase
                 'data' => [
                     '*' => [
                         'department',
-                        'role',
+                        'user',
                         'contact_information',
                         'employments',
                     ],

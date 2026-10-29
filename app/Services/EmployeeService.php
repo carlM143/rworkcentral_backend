@@ -22,8 +22,18 @@ class EmployeeService
                 $contact = $data['contact'];
                 $employment = $data['employment'];
 
+                // Create User account automatically for the employee with default password '*' and 'Employee' role
+                $employeeRole = \App\Models\Role::where('name', 'Employee')->first();
+                $user = \App\Models\User::create([
+                    'role_id' => $employeeRole?->id,
+                    'name' => trim("{$personal['firstname']} {$personal['lastname']}"),
+                    'email' => $contact['email'],
+                    'password' => '*',
+                ]);
+
                 // Create Employee
                 $employee = Employee::create([
+                    'user_id' => $user->id,
                     'emp_id' => $this->generateEmployeeId(),
                     'department_id' => $employment['department_id'],
                     'firstname' => $personal['firstname'],

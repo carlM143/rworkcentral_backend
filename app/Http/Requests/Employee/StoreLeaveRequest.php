@@ -28,7 +28,7 @@ class StoreLeaveRequest extends FormRequest
             'file_path' => ['nullable', 'string', 'max:500'],
             'image' => ['nullable'],
             'remove_image' => ['nullable'],
-            'file' => ['nullable'],
+            'requested_pay_type' => ['nullable', 'in:paid,unpaid'],
         ];
     }
 }

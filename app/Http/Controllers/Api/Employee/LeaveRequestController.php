@@ -120,11 +120,14 @@ class LeaveRequestController extends Controller
         $filePath = $this->handleFileUpload($request, $employee->id) ?? ($validated['file_path'] ?? null);
         $requestNo = 'LR-' . date('Ymd') . '-' . strtoupper(Str::random(6));
 
+        $requestedPayType = $validated['requested_pay_type'] ?? 'paid';
+
         $leaveRequest = $employee->leaveRequests()->create([
             'leave_type_id' => $leaveTypeId,
             'leave_policy_id' => $policyId,
             'request_no' => $requestNo,
             'request_date' => $requestDate,
+            'requested_pay_type' => $requestedPayType,
             'reason' => $validated['reason'] ?? null,
             'file_path' => $filePath,
             'status' => 'pending',
