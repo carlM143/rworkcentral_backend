@@ -98,7 +98,7 @@ class ScheduleController extends Controller
     private function validateSchedule(Request $request, ?WorkSchedule $workSchedule = null): array
     {
         return $request->validate([
-            'schedule_type_id' => ['required', 'integer', Rule::exists('schedule_types', 'id')->where(fn ($query) => $query->where('type_name', '!=', 'Flexible'))],
+            'schedule_type_id' => ['required', 'integer', Rule::exists('schedule_types', 'id')],
             'schedule_code' => ['required', 'string', 'max:50', Rule::unique('work_schedules', 'schedule_code')->ignore($workSchedule?->id)],
             'schedule_name' => ['required', 'string', 'max:255'],
             'time_in' => ['required', 'date_format:H:i'],

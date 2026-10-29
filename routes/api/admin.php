@@ -37,7 +37,7 @@ Route::get('/system-users/{user}/edit', [SystemUserController::class, 'edit']);
 Route::match(['put', 'patch'], '/system-users/{user}', [SystemUserController::class, 'update']);
 Route::patch('/system-users/{user}/role', [SystemUserController::class, 'updateRole']);
 Route::get('schedule-types', [ScheduleTypeController::class, 'index']);
-Route::get('employment-types', [EmploymentTypeController::class, 'index']);
+Route::apiResource('employment-types', EmploymentTypeController::class);
 Route::get('employment-documents', [EmploymentDocumentsController::class, 'index']);
 Route::get('rest-days', [RestDayController::class, 'index']);
 Route::apiResource('work-schedules', ScheduleController::class);
