@@ -1,5 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\CompanyController;
+use App\Http\Controllers\Api\Admin\ContributionDeductionSettingController;
+use App\Http\Controllers\Api\Admin\ContributionRateBracketController;
+use App\Http\Controllers\Api\Admin\ContributionTypeController;
+use App\Http\Controllers\Api\Admin\ContributionRateScheduleController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\EmployeeController;
 use App\Http\Controllers\Api\Admin\EmployeeLeaveBalanceController;
@@ -42,6 +47,12 @@ Route::apiResource('work-schedules', ScheduleController::class);
 
 Route::apiResource('departments', DepartmentController::class);
 Route::apiResource('positions', PositionController::class);
+
+Route::apiResource('contribution-types', ContributionTypeController::class);
+Route::apiResource('contribution-rate-schedules', ContributionRateScheduleController::class);
+Route::apiResource('contribution-rate-brackets', ContributionRateBracketController::class);
+Route::apiResource('contribution-deduction-settings', ContributionDeductionSettingController::class);
+Route::get('companies', [CompanyController::class, 'index']);
 
 Route::get('salary-types', [SalaryTypeController::class, 'index']);
 Route::get('payroll-groups', [PayrollGroupController::class, 'index']);
