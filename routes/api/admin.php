@@ -17,6 +17,9 @@ use App\Http\Controllers\Api\Admin\ScheduleTypeController;
 use App\Http\Controllers\Api\Admin\SystemUserController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
 use App\Http\Controllers\Api\Admin\LeaveCreditTransactionController;
+use App\Http\Controllers\Api\Admin\TimeLogController;
+use App\Http\Controllers\Api\Admin\TimeLogImportController;
+use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
 
 
 use Illuminate\Support\Facades\Route;
@@ -71,3 +74,47 @@ Route::patch('undertime-requests/{undertimeRequest}/revert', [UndertimeControlle
 Route::get('leave-credit-transactions', [LeaveCreditTransactionController::class, 'index']);
 Route::get('leave-credit-balances', [LeaveCreditTransactionController::class, 'balances']);
 Route::post('leave-credit-transactions/adjust', [LeaveCreditTransactionController::class, 'adjust']);
+
+// ============================================
+// TIME LOGS
+// ============================================
+
+Route::post('time-logs/import', [TimeLogImportController::class, 'store']);
+Route::get('time-logs', [TimeLogController::class, 'index']);
+Route::get('time-logs/{timeLog}', [TimeLogController::class, 'show']);
+
+// ============================================
+// TIME LOG CORRECTION REQUESTS
+// ============================================
+
+Route::get(
+    'time-log-corrections',
+    [TimeLogCorrectionRequestController::class, 'index']
+);
+
+Route::post(
+    'time-log-corrections',
+    [TimeLogCorrectionRequestController::class, 'store']
+);
+
+Route::get(
+    'time-logs/{timeLog}/correction-history',
+    [TimeLogCorrectionRequestController::class, 'history']
+);
+
+Route::get(
+    'time-log-corrections/{correction}',
+    [TimeLogCorrectionRequestController::class, 'show']
+);
+
+Route::patch(
+    'time-log-corrections/{correction}/approve',
+    [TimeLogCorrectionRequestController::class, 'approve']
+);
+
+Route::patch(
+    'time-log-corrections/{correction}/reject',
+    [TimeLogCorrectionRequestController::class, 'reject']
+);
+
+
