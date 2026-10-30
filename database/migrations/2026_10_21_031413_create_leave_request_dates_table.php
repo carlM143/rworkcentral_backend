@@ -14,6 +14,8 @@ return new class extends Migration
             $table->date('leave_date');
             $table->enum('day_type', ['whole_day', 'half_day']);
             $table->decimal('day_value', 3, 2)->default(1.00);
+            $table->enum('requested_pay_type', ['paid', 'unpaid'])->nullable();
+            $table->enum('approved_pay_type', ['paid', 'unpaid'])->nullable();
             $table->unique(['leave_request_id', 'leave_date']);
             $table->timestamps();
         });

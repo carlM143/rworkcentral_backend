@@ -23,15 +23,20 @@ class DatabaseSeeder extends Seeder
 
             EmploymentTypeSeeder::class,
             EmploymentDocumentSeeder::class,
-            LeaveTypeSeeder::class,
+
             SalaryTypeSeeder::class,
-            LeaveTypeSeeder::class,
             PayrollGroupSeeder::class,
             PayrollPeriodSeeder::class,
             WorkScheduleSeeder::class,
+            WorkScheduleDaySeeder::class,
+
+            LeaveTypeSeeder::class,
+            LeavePolicySeeder::class,
 
             LoanTypeSeeder::class,
             ContributionTypeSeeder::class,
+
+            EmployeeSeeder::class,
         ]);
     }
 }

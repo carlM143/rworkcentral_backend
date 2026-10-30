@@ -4,326 +4,463 @@ namespace App\Http\Controllers\Api\Employee;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Employee\StoreLeaveRequest;
+use App\Models\Employee;
 use App\Models\LeavePolicy;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
+use App\Services\LeaveCreditService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class LeaveRequestController extends Controller
 {
+    public function __construct(private LeaveCreditService $credits) {}
+
     public function index(Request $request): JsonResponse
     {
-        $employee = $request->user()?->employee;
-
-        if (! $employee) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No employee profile associated with this account.',
-            ], 404);
-        }
-
+        $employee = $this->authenticatedEmployee($request);
         $query = $employee->leaveRequests()->with(['leaveType', 'leavePolicy', 'leaveDates']);
 
         if ($request->filled('status')) {
             $query->where('status', strtolower($request->string('status')->trim()->toString()));
         }
 
-        $records = $query->latest('id')->get()->map(fn ($r) => $this->formatLeaveRequest($r));
-
         return response()->json([
             'success' => true,
             'message' => 'Leave requests retrieved successfully.',
-            'data' => $records,
-        ]);
-    }
-
-    public function types(Request $request): JsonResponse
-    {
-        $employee = $request->user()?->employee;
-        $employmentType = $employee?->employments()->latest('id')->first()?->employmentType;
-
-        $query = LeaveType::query()->where('status', 'active')->with(['leavePolicies' => function ($q) use ($employmentType) {
-            if ($employmentType) {
-                $q->where('employment_type_id', $employmentType->id);
-            }
-        }]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Leave types retrieved successfully.',
-            'data' => $query->get(),
+            'data' => $query->latest('id')->get()->map(
+                fn (LeaveRequest $leaveRequest) => $this->formatLeaveRequest($leaveRequest)
+            ),
         ]);
     }
 
     public function store(StoreLeaveRequest $request): JsonResponse
     {
-        $employee = $request->user()?->employee;
-
-        if (! $employee) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No employee profile associated with this account.',
-            ], 404);
-        }
-
+        $employee = $this->authenticatedEmployee($request);
         $validated = $request->validated();
+        $leaveType = $this->resolveActiveLeaveType($validated);
+        $dates = $this->normalizeDates($validated);
+        $payType = $this->derivePayType($dates, $validated['requested_pay_type'] ?? null);
+        $policy = $this->validateRequest($employee, $leaveType->id, $dates);
+        $filePath = $this->handleFileUpload($request, $employee->id)
+            ?? ($validated['file_path'] ?? null);
 
-        $leaveTypeId = $validated['leave_type_id'] ?? null;
-        if (! $leaveTypeId && ! empty($validated['type'])) {
-            $typeModel = LeaveType::where('leave_name', $validated['type'])
-                ->orWhere('leave_code', $validated['type'])
-                ->first();
-            $leaveTypeId = $typeModel?->id;
-        }
+        try {
+            $leaveRequest = DB::transaction(function () use (
+                $employee,
+                $leaveType,
+                $policy,
+                $payType,
+                $dates,
+                $validated,
+                $filePath
+            ): LeaveRequest {
+                $leaveRequest = $employee->leaveRequests()->create([
+                    'leave_type_id' => $leaveType->id,
+                    'leave_policy_id' => $policy?->id,
+                    'request_no' => 'LR-'.now()->format('Ymd').'-'.strtoupper(Str::random(6)),
+                    'request_date' => $validated['request_date'] ?? now()->toDateString(),
+                    'requested_pay_type' => $payType,
+                    'reason' => $validated['reason'] ?? null,
+                    'file_path' => $filePath,
+                    'status' => 'pending',
+                ]);
 
-        if (! $leaveTypeId) {
-            $firstType = LeaveType::where('status', 'active')->first();
-            $leaveTypeId = $firstType?->id;
-        }
+                $leaveRequest->leaveDates()->createMany($dates);
 
-        if (! $leaveTypeId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No leave type found or configured in the system.',
-            ], 422);
-        }
-
-        $policyId = $validated['leave_policy_id'] ?? null;
-        if (! $policyId) {
-            $employmentTypeId = $employee->employments()->latest('id')->first()?->employment_type_id;
-
-            $policy = LeavePolicy::query()
-                ->where('leave_type_id', $leaveTypeId)
-                ->when($employmentTypeId, fn ($q) => $q->where('employment_type_id', $employmentTypeId))
-                ->first()
-                ?? LeavePolicy::where('leave_type_id', $leaveTypeId)->first()
-                ?? LeavePolicy::first();
-
-            $policyId = $policy?->id;
-        }
-
-        if (! $policyId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No leave policy found for the selected leave type.',
-            ], 422);
-        }
-
-        $requestDate = $validated['request_date'] ?? $validated['start_date'] ?? $validated['start'] ?? now()->toDateString();
-        $startDate = $validated['start_date'] ?? $validated['start'] ?? $requestDate;
-        $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
-
-        $filePath = $this->handleFileUpload($request, $employee->id) ?? ($validated['file_path'] ?? null);
-        $requestNo = 'LR-' . date('Ymd') . '-' . strtoupper(Str::random(6));
-
-        $requestedPayType = $validated['requested_pay_type'] ?? 'paid';
-
-        $leaveRequest = $employee->leaveRequests()->create([
-            'leave_type_id' => $leaveTypeId,
-            'leave_policy_id' => $policyId,
-            'request_no' => $requestNo,
-            'request_date' => $requestDate,
-            'requested_pay_type' => $requestedPayType,
-            'reason' => $validated['reason'] ?? null,
-            'file_path' => $filePath,
-            'status' => 'pending',
-        ]);
-
-        if (! empty($validated['dates']) && is_array($validated['dates'])) {
-            foreach ($validated['dates'] as $date) {
-                $rawDayType = is_array($date) ? ($date['day_type'] ?? 'whole_day') : 'whole_day';
-                $dayType = in_array($rawDayType, ['whole_day', 'half_day']) ? $rawDayType : ($rawDayType === 'half' ? 'half_day' : 'whole_day');
-                $leaveDate = is_array($date) ? ($date['leave_date'] ?? $date['date'] ?? $requestDate) : $date;
-                $dayValue = (float) (is_array($date) ? ($date['day_value'] ?? ($dayType === 'half_day' ? 0.5 : 1.0)) : 1.0);
-                $leaveRequest->leaveDates()->firstOrCreate(
-                    ['leave_date' => $leaveDate],
-                    [
-                        'day_type' => $dayType,
-                        'day_value' => $dayValue,
-                    ]
-                );
-            }
-        } else {
-            $start = Carbon::parse($startDate);
-            $end = Carbon::parse($endDate);
-            if ($end->lt($start)) {
-                $end = $start->copy();
+                return $leaveRequest;
+            });
+        } catch (Throwable $exception) {
+            if ($filePath && $filePath !== ($validated['file_path'] ?? null)) {
+                Storage::disk('public')->delete($filePath);
             }
 
-            for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
-                $leaveRequest->leaveDates()->firstOrCreate(
-                    ['leave_date' => $d->toDateString()],
-                    [
-                        'day_type' => 'whole_day',
-                        'day_value' => 1.0,
-                    ]
-                );
-            }
+            throw $exception;
         }
-
-        $formatted = $this->formatLeaveRequest($leaveRequest->load(['leaveType', 'leavePolicy', 'leaveDates']));
 
         return response()->json([
             'success' => true,
             'message' => 'Leave request submitted successfully.',
-            'data' => $formatted,
+            'data' => $this->formatLeaveRequest(
+                $leaveRequest->load(['leaveType', 'leavePolicy', 'leaveDates'])
+            ),
         ], 201);
     }
 
     public function update(LeaveRequest $leaveRequest, StoreLeaveRequest $request): JsonResponse
     {
-        $employee = $request->user()?->employee;
-
-        if (! $employee || $leaveRequest->employee_id !== $employee->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized action.',
-            ], 403);
-        }
-
-        if ($leaveRequest->status !== 'pending') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only pending leave requests can be updated.',
-            ], 422);
-        }
-
+        $employee = $this->authenticatedEmployee($request);
+        $this->ensureEmployeeOwnsPendingRequest($employee, $leaveRequest);
         $validated = $request->validated();
+        $leaveType = $this->resolveActiveLeaveType($validated, $leaveRequest->leave_type_id);
+        $dates = $this->datesForUpdate($leaveRequest, $validated);
+        $payType = $this->derivePayType($dates, $validated['requested_pay_type'] ?? null);
+        $policy = $this->validateRequest($employee, $leaveType->id, $dates, $leaveRequest->id);
+        $newFilePath = $this->handleFileUpload($request, $employee->id);
+        $oldFilePath = $leaveRequest->file_path;
+        $removeFile = $request->boolean('remove_image')
+            || ($request->has('image')
+                && is_null($request->input('image'))
+                && ! $request->hasFile('file')
+                && ! $request->hasFile('image'));
 
-        if (! empty($validated['leave_type_id'])) {
-            $leaveRequest->leave_type_id = $validated['leave_type_id'];
-        } elseif (! empty($validated['type'])) {
-            $typeModel = LeaveType::where('leave_name', $validated['type'])->orWhere('leave_code', $validated['type'])->first();
-            if ($typeModel) {
-                $leaveRequest->leave_type_id = $typeModel->id;
-            }
-        }
+        try {
+            DB::transaction(function () use (
+                $leaveRequest,
+                $leaveType,
+                $policy,
+                $payType,
+                $dates,
+                $validated,
+                $newFilePath,
+                $removeFile
+            ): void {
+                $updates = [
+                    'leave_type_id' => $leaveType->id,
+                    'leave_policy_id' => $policy?->id,
+                    'requested_pay_type' => $payType,
+                ];
 
-        if (! empty($validated['request_date'])) {
-            $leaveRequest->request_date = $validated['request_date'];
-        }
-
-        if (array_key_exists('reason', $validated)) {
-            $leaveRequest->reason = $validated['reason'];
-        }
-
-        if ($request->boolean('remove_image') || ($request->has('image') && is_null($request->input('image')) && ! $request->hasFile('file') && ! $request->hasFile('image'))) {
-            if ($leaveRequest->file_path && Storage::disk('public')->exists($leaveRequest->file_path)) {
-                Storage::disk('public')->delete($leaveRequest->file_path);
-            }
-            $leaveRequest->file_path = null;
-        } else {
-            $filePath = $this->handleFileUpload($request, $employee->id);
-            if ($filePath) {
-                if ($leaveRequest->file_path && $leaveRequest->file_path !== $filePath && Storage::disk('public')->exists($leaveRequest->file_path)) {
-                    Storage::disk('public')->delete($leaveRequest->file_path);
+                if (array_key_exists('request_date', $validated)) {
+                    $updates['request_date'] = $validated['request_date'];
                 }
-                $leaveRequest->file_path = $filePath;
-            }
-        }
 
-        $leaveRequest->save();
+                if (array_key_exists('reason', $validated)) {
+                    $updates['reason'] = $validated['reason'];
+                }
 
-        if (! empty($validated['dates']) && is_array($validated['dates'])) {
-            $leaveRequest->leaveDates()->delete();
-            foreach ($validated['dates'] as $date) {
-                $rawDayType = is_array($date) ? ($date['day_type'] ?? 'whole_day') : 'whole_day';
-                $dayType = in_array($rawDayType, ['whole_day', 'half_day']) ? $rawDayType : ($rawDayType === 'half' ? 'half_day' : 'whole_day');
-                $leaveDate = is_array($date) ? ($date['leave_date'] ?? $date['date'] ?? now()->toDateString()) : $date;
-                $dayValue = (float) (is_array($date) ? ($date['day_value'] ?? ($dayType === 'half_day' ? 0.5 : 1.0)) : 1.0);
-                $leaveRequest->leaveDates()->create([
-                    'leave_date' => $leaveDate,
-                    'day_type' => $dayType,
-                    'day_value' => $dayValue,
-                ]);
-            }
-        } else {
-            $startDate = $validated['start_date'] ?? $validated['start'] ?? null;
-            $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
-            if ($startDate) {
+                if ($removeFile) {
+                    $updates['file_path'] = null;
+                } elseif ($newFilePath) {
+                    $updates['file_path'] = $newFilePath;
+                }
+
+                $leaveRequest->update($updates);
                 $leaveRequest->leaveDates()->delete();
-                $start = Carbon::parse($startDate);
-                $end = Carbon::parse($endDate);
-                if ($end->lt($start)) {
-                    $end = $start->copy();
-                }
-                for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
-                    $leaveRequest->leaveDates()->create([
-                        'leave_date' => $d->toDateString(),
-                        'day_type' => 'whole_day',
-                        'day_value' => 1.0,
-                    ]);
-                }
+                $leaveRequest->leaveDates()->createMany($dates);
+            });
+        } catch (Throwable $exception) {
+            if ($newFilePath) {
+                Storage::disk('public')->delete($newFilePath);
             }
+
+            throw $exception;
+        }
+
+        if (($removeFile || $newFilePath) && $oldFilePath && $oldFilePath !== $newFilePath) {
+            Storage::disk('public')->delete($oldFilePath);
         }
 
         return response()->json([
             'success' => true,
             'message' => 'Leave request updated successfully.',
-            'data' => $this->formatLeaveRequest($leaveRequest->fresh(['leaveType', 'leavePolicy', 'leaveDates'])),
+            'data' => $this->formatLeaveRequest(
+                $leaveRequest->fresh(['leaveType', 'leavePolicy', 'leaveDates'])
+            ),
         ]);
     }
 
     public function cancel(LeaveRequest $leaveRequest, Request $request): JsonResponse
     {
-        $employee = $request->user()?->employee;
-
-        if (! $employee || $leaveRequest->employee_id !== $employee->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized action.',
-            ], 403);
-        }
-
-        if ($leaveRequest->status !== 'pending') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only pending leave requests can be cancelled.',
-            ], 422);
-        }
-
+        $employee = $this->authenticatedEmployee($request);
+        $this->ensureEmployeeOwnsPendingRequest($employee, $leaveRequest);
         $leaveRequest->update(['status' => 'cancelled']);
 
         return response()->json([
             'success' => true,
             'message' => 'Leave request cancelled successfully.',
-            'data' => $this->formatLeaveRequest($leaveRequest->fresh(['leaveType', 'leavePolicy', 'leaveDates'])),
+            'data' => $this->formatLeaveRequest(
+                $leaveRequest->fresh(['leaveType', 'leavePolicy', 'leaveDates'])
+            ),
         ]);
     }
 
-    protected function formatLeaveRequest(LeaveRequest $request): array
+    private function authenticatedEmployee(Request $request): Employee
     {
-        $dates = $request->leaveDates ? $request->leaveDates->sortBy('leave_date') : collect();
-        $firstDateObj = $dates->first();
-        $lastDateObj = $dates->last();
+        $employee = $request->user()?->employee;
 
-        $firstDate = $firstDateObj?->leave_date
-            ? (is_string($firstDateObj->leave_date) ? substr($firstDateObj->leave_date, 0, 10) : $firstDateObj->leave_date->format('Y-m-d'))
-            : (is_string($request->request_date) ? substr($request->request_date, 0, 10) : $request->request_date?->format('Y-m-d'));
+        if (! $employee) {
+            abort(404, 'No employee profile associated with this account.');
+        }
 
-        $lastDate = $lastDateObj?->leave_date
-            ? (is_string($lastDateObj->leave_date) ? substr($lastDateObj->leave_date, 0, 10) : $lastDateObj->leave_date->format('Y-m-d'))
-            : $firstDate;
+        return $employee;
+    }
 
+    private function resolveActiveLeaveType(array $validated, ?int $fallbackId = null): LeaveType
+    {
+        $query = LeaveType::query()->where('status', 'active');
+
+        if (! empty($validated['leave_type_id'])) {
+            $leaveType = (clone $query)->find($validated['leave_type_id']);
+        } elseif (! empty($validated['type'])) {
+            $leaveType = (clone $query)
+                ->where(function ($query) use ($validated): void {
+                    $query->where('leave_name', $validated['type'])
+                        ->orWhere('leave_code', $validated['type']);
+                })
+                ->first();
+        } elseif ($fallbackId) {
+            $leaveType = (clone $query)->find($fallbackId);
+        } else {
+            $leaveType = null;
+        }
+
+        if (! $leaveType) {
+            throw ValidationException::withMessages([
+                'leave_type_id' => 'Please select an active leave type.',
+            ]);
+        }
+
+        return $leaveType;
+    }
+
+    private function normalizeDates(array $validated): array
+    {
+        $parentPayType = $validated['requested_pay_type'] ?? 'paid';
+
+        if (! empty($validated['dates'])) {
+            $dates = collect($validated['dates'])->map(function (array $date) use ($parentPayType): array {
+                $dayType = $date['day_type'];
+                $dayValue = $dayType === 'half_day' ? 0.5 : 1.0;
+
+                if (isset($date['day_value']) && (float) $date['day_value'] !== $dayValue) {
+                    throw ValidationException::withMessages([
+                        'dates' => 'Day value must be 1.00 for a whole day or 0.50 for a half day.',
+                    ]);
+                }
+
+                $datePayType = $date['requested_pay_type'] ?? null;
+
+                if (! $datePayType && in_array($parentPayType, ['paid', 'unpaid'], true)) {
+                    $datePayType = $parentPayType;
+                }
+
+                if (! in_array($datePayType, ['paid', 'unpaid'], true)) {
+                    throw ValidationException::withMessages([
+                        'dates' => 'Every date in a mixed request must be explicitly marked paid or unpaid.',
+                    ]);
+                }
+
+                return [
+                    'leave_date' => Carbon::parse($date['leave_date'])->toDateString(),
+                    'day_type' => $dayType,
+                    'day_value' => $dayValue,
+                    'requested_pay_type' => $datePayType,
+                    'approved_pay_type' => null,
+                ];
+            })->values();
+        } else {
+            if ($parentPayType === 'mixed') {
+                throw ValidationException::withMessages([
+                    'dates' => 'A mixed request requires a paid or unpaid classification for every date.',
+                ]);
+            }
+
+            $startDate = $validated['start_date']
+                ?? $validated['start']
+                ?? $validated['request_date']
+                ?? now()->toDateString();
+            $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
+            $start = Carbon::parse($startDate);
+            $end = Carbon::parse($endDate);
+
+            if ($end->lessThan($start)) {
+                throw ValidationException::withMessages([
+                    'end_date' => 'The end date must be on or after the start date.',
+                ]);
+            }
+
+            $dates = collect();
+            for ($date = $start->copy(); $date->lessThanOrEqualTo($end); $date->addDay()) {
+                $dates->push([
+                    'leave_date' => $date->toDateString(),
+                    'day_type' => 'whole_day',
+                    'day_value' => 1.0,
+                    'requested_pay_type' => $parentPayType,
+                    'approved_pay_type' => null,
+                ]);
+            }
+        }
+
+        if ($dates->pluck('leave_date')->unique()->count() !== $dates->count()) {
+            throw ValidationException::withMessages([
+                'dates' => 'Duplicate leave dates are not allowed.',
+            ]);
+        }
+
+        if ($dates->pluck('leave_date')->map(fn ($date) => Carbon::parse($date)->year)->unique()->count() > 1) {
+            throw ValidationException::withMessages([
+                'dates' => 'Leave dates spanning different years require separate requests.',
+            ]);
+        }
+
+        return $dates->sortBy('leave_date')->values()->all();
+    }
+
+    private function datesForUpdate(LeaveRequest $leaveRequest, array $validated): array
+    {
+        $hasNewDates = array_key_exists('dates', $validated)
+            || isset($validated['start_date'])
+            || isset($validated['start']);
+
+        if ($hasNewDates) {
+            return $this->normalizeDates($validated);
+        }
+
+        $requestedPayType = $validated['requested_pay_type'] ?? null;
+        $existingDates = $leaveRequest->leaveDates()->orderBy('leave_date')->get();
+
+        if ($existingDates->isEmpty()) {
+            return $this->normalizeDates([
+                'request_date' => $validated['request_date'] ?? $leaveRequest->request_date,
+                'requested_pay_type' => $requestedPayType ?? $leaveRequest->requested_pay_type,
+            ]);
+        }
+
+        return $existingDates->map(function ($date) use ($requestedPayType, $leaveRequest): array {
+            $payType = $date->requested_pay_type;
+
+            if ($requestedPayType && $requestedPayType !== 'mixed') {
+                $payType = $requestedPayType;
+            }
+
+            $payType ??= in_array($leaveRequest->requested_pay_type, ['paid', 'unpaid'], true)
+                ? $leaveRequest->requested_pay_type
+                : null;
+
+            if (! $payType) {
+                throw ValidationException::withMessages([
+                    'dates' => 'Every date in a mixed request must be explicitly marked paid or unpaid.',
+                ]);
+            }
+
+            return [
+                'leave_date' => $date->leave_date->toDateString(),
+                'day_type' => $date->day_type,
+                'day_value' => (float) $date->day_value,
+                'requested_pay_type' => $payType,
+                'approved_pay_type' => null,
+            ];
+        })->all();
+    }
+
+    private function derivePayType(array $dates, ?string $suppliedPayType): string
+    {
+        $types = collect($dates)->pluck('requested_pay_type')->unique()->values();
+        $derived = $types->count() > 1 ? 'mixed' : (string) $types->first();
+
+        if ($suppliedPayType && $suppliedPayType !== $derived) {
+            throw ValidationException::withMessages([
+                'requested_pay_type' => "The request payment type must be {$derived} based on its dates.",
+            ]);
+        }
+
+        return $derived;
+    }
+
+    private function validateRequest(
+        Employee $employee,
+        int $leaveTypeId,
+        array $dates,
+        ?int $ignoreRequestId = null
+    ): ?LeavePolicy {
+        $dateValues = collect($dates)->pluck('leave_date');
+        $overlapQuery = DB::table('leave_request_dates as dates')
+            ->join('leave_requests as requests', 'requests.id', '=', 'dates.leave_request_id')
+            ->where('requests.employee_id', $employee->id)
+            ->where('requests.status', 'approved')
+            ->whereIn('dates.leave_date', $dateValues);
+
+        if ($ignoreRequestId) {
+            $overlapQuery->where('requests.id', '!=', $ignoreRequestId);
+        }
+
+        if ($overlapQuery->exists()) {
+            throw ValidationException::withMessages([
+                'dates' => 'One or more leave dates already have an approved leave request.',
+            ]);
+        }
+
+        $paidDays = round((float) collect($dates)
+            ->where('requested_pay_type', 'paid')
+            ->sum('day_value'), 2);
+
+        if ($paidDays <= 0) {
+            return null;
+        }
+
+        $firstDate = (string) $dateValues->min();
+        $lastDate = (string) $dateValues->max();
+        $policy = $this->credits->resolvePaidPolicy(
+            $employee,
+            $leaveTypeId,
+            $firstDate,
+            $lastDate
+        );
+
+        if (! $policy) {
+            throw ValidationException::withMessages([
+                'leave_policy_id' => 'No eligible paid leave policy matches your employment type and service period.',
+            ]);
+        }
+
+        if ($policy->usage_window !== 'calendar_year' || $policy->validity_period !== 'annual') {
+            throw ValidationException::withMessages([
+                'leave_policy_id' => 'This paid policy requires a different credit cycle calculation.',
+            ]);
+        }
+
+        $year = Carbon::parse($firstDate)->year;
+        $available = $this->credits->availableBalanceForSubmission($employee, $policy, $year);
+
+        if ($paidDays > $available) {
+            throw ValidationException::withMessages([
+                'leave_credits' => "Insufficient paid leave credits for {$year}. Available: {$available}, Requested: {$paidDays}.",
+            ]);
+        }
+
+        return $policy;
+    }
+
+    private function ensureEmployeeOwnsPendingRequest(Employee $employee, LeaveRequest $leaveRequest): void
+    {
+        abort_if($leaveRequest->employee_id !== $employee->id, 403, 'Unauthorized action.');
+
+        if ($leaveRequest->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'status' => 'Only pending leave requests can be updated or cancelled.',
+            ]);
+        }
+    }
+
+    private function formatLeaveRequest(LeaveRequest $request): array
+    {
+        $dates = $request->leaveDates->sortBy('leave_date')->values();
         $fileUrl = $request->file_path
-            ? (str_starts_with($request->file_path, 'http') ? $request->file_path : asset('storage/' . ltrim($request->file_path, '/')))
+            ? (str_starts_with($request->file_path, 'http')
+                ? $request->file_path
+                : asset('storage/'.ltrim($request->file_path, '/')))
             : null;
 
         return [
-            'id' => $request->request_no ?: ('LR-' . $request->id),
+            'id' => $request->request_no ?: ('LR-'.$request->id),
             'raw_id' => $request->id,
             'request_no' => $request->request_no,
             'category' => 'Leave',
-            'type' => $request->leaveType?->leave_name ?? 'Vacation Leave',
+            'type' => $request->leaveType?->leave_name ?? 'Unknown Leave Type',
             'leave_type_id' => $request->leave_type_id,
             'leave_policy_id' => $request->leave_policy_id,
-            'request_date' => is_string($request->request_date) ? substr($request->request_date, 0, 10) : $request->request_date?->format('Y-m-d'),
-            'start' => $firstDate ?: now()->toDateString(),
-            'end' => $lastDate ?: ($firstDate ?: now()->toDateString()),
+            'request_date' => $request->request_date?->format('Y-m-d'),
+            'requested_pay_type' => $request->requested_pay_type,
+            'approved_pay_type' => $request->approved_pay_type,
+            'start' => $dates->first()?->leave_date?->format('Y-m-d'),
+            'end' => $dates->last()?->leave_date?->format('Y-m-d'),
             'reason' => $request->reason ?? '',
             'status' => $request->status,
             'status_label' => ucfirst($request->status),
@@ -333,18 +470,24 @@ class LeaveRequestController extends Controller
                 'name' => basename($request->file_path),
                 'dataUrl' => $fileUrl,
             ] : null,
-            'dates' => $dates->map(fn ($d) => [
-                'id' => $d->id,
-                'leave_date' => is_string($d->leave_date) ? substr($d->leave_date, 0, 10) : $d->leave_date?->format('Y-m-d'),
-                'day_type' => $d->day_type,
-                'day_value' => (float) $d->day_value,
-            ])->values()->all(),
-            'total_days' => (float) $dates->sum('day_value'),
+            'dates' => $dates->map(fn ($date) => [
+                'id' => $date->id,
+                'leave_date' => $date->leave_date?->format('Y-m-d'),
+                'day_type' => $date->day_type,
+                'day_value' => (float) $date->day_value,
+                'requested_pay_type' => $date->requested_pay_type,
+                'approved_pay_type' => $date->approved_pay_type,
+            ])->all(),
+            'total_days' => round((float) $dates->sum('day_value'), 2),
+            'total_paid_days' => round((float) $dates
+                ->where('requested_pay_type', 'paid')->sum('day_value'), 2),
+            'total_unpaid_days' => round((float) $dates
+                ->where('requested_pay_type', 'unpaid')->sum('day_value'), 2),
             'created_at' => $request->created_at?->toIso8601String(),
         ];
     }
 
-    protected function handleFileUpload(Request $request, int $employeeId): ?string
+    private function handleFileUpload(Request $request, int $employeeId): ?string
     {
         $file = $request->file('file') ?? $request->file('image');
         if ($file && $file->isValid()) {
@@ -355,28 +498,29 @@ class LeaveRequestController extends Controller
             ?? (is_string($request->input('image')) ? $request->input('image') : null)
             ?? $request->input('file_base64');
 
-        if ($imageData && is_string($imageData) && str_starts_with($imageData, 'data:image')) {
-            $extension = 'jpg';
-            if (preg_match('/^data:(image\/[a-zA-Z0-9\+\-]+);base64,/', $imageData, $matches)) {
-                $mimeType = $matches[1];
-                $extension = match ($mimeType) {
-                    'image/png' => 'png',
-                    'image/webp' => 'webp',
-                    'image/gif' => 'gif',
-                    default => 'jpg',
-                };
-                $imageData = substr($imageData, strpos($imageData, ',') + 1);
-            }
-
-            $binary = base64_decode($imageData, true);
-            if ($binary !== false) {
-                $filename = 'req_' . Str::random(16) . '.' . $extension;
-                $path = "requests/{$employeeId}/{$filename}";
-                Storage::disk('public')->put($path, $binary);
-                return $path;
-            }
+        if (! $imageData || ! is_string($imageData) || ! str_starts_with($imageData, 'data:image')) {
+            return null;
         }
 
-        return null;
+        $extension = 'jpg';
+        if (preg_match('/^data:(image\/[a-zA-Z0-9\+\-]+);base64,/', $imageData, $matches)) {
+            $extension = match ($matches[1]) {
+                'image/png' => 'png',
+                'image/webp' => 'webp',
+                'image/gif' => 'gif',
+                default => 'jpg',
+            };
+            $imageData = substr($imageData, strpos($imageData, ',') + 1);
+        }
+
+        $binary = base64_decode($imageData, true);
+        if ($binary === false) {
+            return null;
+        }
+
+        $path = "requests/{$employeeId}/req_".Str::random(16).".{$extension}";
+        Storage::disk('public')->put($path, $binary);
+
+        return $path;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkSchedule extends Model
 {
@@ -46,5 +47,10 @@ class WorkSchedule extends Model
     public function undertimeRequests()
     {
         return $this->hasMany(UndertimeRequest::class);
+    }
+    public function days(): HasMany
+    {
+        return $this->hasMany(WorkScheduleDay::class)
+            ->orderByRaw("FIELD(day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat', 'Sun')");
     }
 }

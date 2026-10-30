@@ -28,8 +28,6 @@ Route::post('/employees', [EmployeeController::class, 'store']);
 Route::get('/employees/{employee}', [EmployeeController::class, 'show']);
 Route::match(['put', 'patch'], '/employees/{employee}', [EmployeeController::class, 'update']);
 Route::patch('/employees/{employee}/deactivate', [EmployeeController::class, 'deactivate']);
-Route::get('/employee-leave-balances', [EmployeeLeaveBalanceController::class, 'index']);
-Route::get('/employee-leave-balances/{employee}', [EmployeeLeaveBalanceController::class, 'show']);
 Route::get('/system-users', [SystemUserController::class, 'index']);
 Route::get('/system-users/employees/{employee}/edit', [SystemUserController::class, 'editEmployee']);
 Route::post('/system-users/employees/{employee}/setup-account', [SystemUserController::class, 'setupAccount']);

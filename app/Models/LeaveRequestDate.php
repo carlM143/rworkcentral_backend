@@ -6,19 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class LeaveRequestDate extends Model
 {
-    protected $fillable = [
-        'leave_request_id',
-        'leave_date',
-        'day_type',
-        'day_value',
-    ];
+    protected $fillable = ['leave_request_id', 'leave_date', 'day_type', 'day_value', 'requested_pay_type', 'approved_pay_type'];
 
     protected function casts(): array
     {
-        return [
-            'leave_date' => 'date',
-            'day_value' => 'decimal:2',
-        ];
+        return ['leave_date' => 'date', 'day_value' => 'decimal:2'];
     }
 
     public function leaveRequest()

@@ -22,7 +22,6 @@ class LeaveRequest extends Model
         'status',
     ];
 
-
     protected function casts(): array
     {
         return [
@@ -60,7 +59,7 @@ class LeaveRequest extends Model
     {
         return $this->hasMany(LeaveRequest::class, 'leave_request_id');
     }
-    
+
     public function leaveDates()
     {
         return $this->hasMany(LeaveRequestDate::class);

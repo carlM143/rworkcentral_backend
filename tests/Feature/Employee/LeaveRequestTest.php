@@ -9,6 +9,7 @@ use App\Models\EmploymentType;
 use App\Models\LeavePolicy;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
+use App\Models\Position;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -57,6 +58,20 @@ class LeaveRequestTest extends TestCase
         $employmentType = EmploymentType::create([
             'name' => 'Regular',
             'status' => 'active',
+        ]);
+
+        $position = Position::create([
+            'department_id' => $department->id,
+            'position' => 'Operations Staff',
+            'description' => 'Operations staff position',
+            'status' => true,
+        ]);
+
+        $employee->employments()->create([
+            'employment_type_id' => $employmentType->id,
+            'department_id' => $department->id,
+            'position_id' => $position->id,
+            'date_hired' => now()->subYear()->toDateString(),
         ]);
 
         $leaveType = LeaveType::create([

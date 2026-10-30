@@ -13,8 +13,6 @@ return new class extends Migration
             $table->foreignId('schedule_type_id')->constrained('schedule_types')->restrictOnDelete();
             $table->string('schedule_code', 50)->unique();
             $table->string('schedule_name');
-            $table->time('time_in');
-            $table->time('time_out');
             $table->decimal('required_work_hours', 4, 2);
             $table->unsignedSmallInteger('grace_period')->default(0);
             $table->time('break_start')->nullable();

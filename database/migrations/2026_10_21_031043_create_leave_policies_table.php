@@ -21,7 +21,7 @@ return new class extends Migration
             $table->boolean('requires_approval')->default(true);
             $table->string('usage_window');
             $table->string('validity_period');
-            $table->date('effective_from');
+            $table->date('effective_from')->nullable();
             $table->date('effective_to')->nullable();
             $table->enum('status', ['pending', 'approved'])->default('pending');
             $table->timestamps();
