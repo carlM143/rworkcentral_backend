@@ -20,8 +20,17 @@ class LeaveApprovalController extends Controller
         $this->authorizeApproval($request);
 
         $requests = LeaveRequest::query()
+            
             ->with([
-                'employee:id,emp_id,firstname,lastname',
+                'employee:id,emp_id,department_id,firstname,lastname',
+
+                // Employee Department
+                'employee.department:id,department_name',
+
+                // Employee Position
+                'employee.latestEmployment.position:id,position',
+
+                // Leave Information
                 'leaveType:id,leave_code,leave_name',
                 'leavePolicy:id,leave_type_id,employment_type_id,is_eligible,is_paid,status',
                 'leaveDates',
@@ -182,11 +191,9 @@ class LeaveApprovalController extends Controller
             ]);
 
             return $record->fresh([
-                'employee:id,emp_id,firstname,lastname',
-                'leaveType:id,leave_code,leave_name',
-                'leavePolicy:id,leave_type_id,employment_type_id,is_eligible,is_paid,status',
-                'leaveDates',
-                'approver:id,name,email',
+                'employee:id,emp_id,department_id,firstname,lastname',
+                'employee.department:id,department_name',
+                'employee.latestEmployment.position:id,position',
             ]);
         });
 
@@ -194,6 +201,84 @@ class LeaveApprovalController extends Controller
             'success' => true,
             'message' => 'Leave request approved successfully.',
             'data' => $this->formatRequest($approved),
+        ]);
+    }
+
+    /**
+     * Undo an approved/rejected leave decision.
+     * For approved paid or mixed leave, the original credit deduction is
+     * offset by an auditable positive ledger entry BEFORE changing status.
+     */
+    public function revert(
+        Request $request,
+        LeaveRequest $leaveRequest,
+        LeaveCreditService $credits
+    ): JsonResponse {
+        $this->authorizeApproval($request);
+
+        $result = DB::transaction(function () use ($request, $leaveRequest, $credits): array {
+            $record = LeaveRequest::query()
+                ->whereKey($leaveRequest->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! in_array($record->status, ['approved', 'rejected'], true)) {
+                throw ValidationException::withMessages([
+                    'status' => 'Only approved or rejected leave requests can be reverted to pending.',
+                ]);
+            }
+
+            $employee = Employee::query()
+                ->whereKey($record->employee_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $restoredDays = 0.0;
+            if ($record->status === 'approved') {
+                $restoredDays = $credits->restoreApprovedLeave(
+                    $employee,
+                    $record,
+                    (int) $request->user()->id
+                );
+            }
+
+            DB::table('leave_request_dates')
+                ->where('leave_request_id', $record->id)
+                ->update([
+                    'approved_pay_type' => null,
+                    'updated_at' => now(),
+                ]);
+
+            $record->update([
+                'status' => 'pending',
+                'approved_pay_type' => null,
+                'approved_by' => null,
+                'approved_at' => null,
+                // Keep leave_policy_id so the pending request retains its
+                // policy association for review; approval re-resolves it.
+            ]);
+
+            return [
+                'restored_days' => $restoredDays,
+                'request' => $record->fresh([
+                    'employee:id,emp_id,department_id,firstname,lastname',
+                    'employee.department:id,department_name',
+                    'employee.latestEmployment.position:id,position',
+                    'leaveType:id,leave_code,leave_name',
+                    'leavePolicy:id,leave_type_id,employment_type_id,is_eligible,is_paid,status',
+                    'leaveDates',
+                    'approver:id,name,email',
+                ]),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['restored_days'] > 0
+                ? "Leave request reverted to pending. {$result['restored_days']} paid leave day(s) restored."
+                : 'Leave request reverted to pending. No paid leave credits required restoration.',
+            'restored_days' => $result['restored_days'],
+            'data' => $this->formatRequest($result['request']),
         ]);
     }
 
@@ -244,11 +329,29 @@ class LeaveApprovalController extends Controller
         return [
             'id' => $request->id,
             'request_no' => $request->request_no,
+            
+            
             'employee' => [
                 'id' => $request->employee?->id,
+
                 'emp_id' => $request->employee?->emp_id,
-                'name' => trim(($request->employee?->firstname ?? '').' '.($request->employee?->lastname ?? '')),
+
+                'name' => trim(
+                    ($request->employee?->firstname ?? '') . ' ' .
+                    ($request->employee?->lastname ?? '')
+                ),
+
+                'department' => $request->employee
+                    ?->department
+                    ?->department_name,
+
+                'position' => $request->employee
+                    ?->latestEmployment
+                    ?->position
+                    ?->position,
             ],
+
+
             'leave_type' => $request->leaveType?->leave_name ?? 'Unknown Leave Type',
             'leave_code' => $request->leaveType?->leave_code,
             'leave_policy_id' => $request->leave_policy_id,

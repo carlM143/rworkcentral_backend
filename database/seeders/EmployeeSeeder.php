@@ -30,7 +30,7 @@ class EmployeeSeeder extends Seeder
                 'civil_status' => 'Single',
                 'status' => true,
 
-                'employment_type' => 'Probationary',
+                'employment_type' => 'Regular',
                 'department_code' => 'IT',
                 'position' => 'Web Developer',
                 'date_hired' => '2026-10-29',
@@ -159,7 +159,6 @@ class EmployeeSeeder extends Seeder
                     'department_id' => $department->id,
                     'position_id' => $position->id,
                     'work_schedule_id' => $defaultSchedule?->id,
-                    'restday_id' => null,
                     'date_hired' => $item['date_hired'],
                     'mobile' => $item['mobile'],
                     'residential_address' => $item['residential_address'],

@@ -49,13 +49,11 @@ class WorkScheduleDaySeeder extends Seeder
                 'time_in' => '08:00:00',
                 'time_out' => '12:00:00',
             ],
-            [
-                'day_of_week' => 'Sun',
-                'is_working_day' => false,
-                'time_in' => null,
-                'time_out' => null,
-            ],
         ];
+
+        WorkScheduleDay::where('work_schedule_id', $schedule->id)
+            ->whereNotIn('day_of_week', array_column($days, 'day_of_week'))
+            ->delete();
 
         foreach ($days as $day) {
             WorkScheduleDay::updateOrCreate(
@@ -64,7 +62,7 @@ class WorkScheduleDaySeeder extends Seeder
                     'day_of_week' => $day['day_of_week'],
                 ],
                 [
-                    'is_working_day' => $day['is_working_day'],
+                    'is_working_day' => true,
                     'time_in' => $day['time_in'],
                     'time_out' => $day['time_out'],
                 ]

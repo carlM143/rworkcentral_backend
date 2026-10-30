@@ -19,7 +19,6 @@ class DatabaseSeeder extends Seeder
             PositionSeeder::class,
 
             ScheduleTypeSeeder::class,
-            RestDaySeeder::class,
 
             EmploymentTypeSeeder::class,
             EmploymentDocumentSeeder::class,

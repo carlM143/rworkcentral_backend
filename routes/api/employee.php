@@ -1,13 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\Employee\EmployeeLeaveCreditController;
+use App\Http\Controllers\Api\Employee\EmployeeLeaveTypesController;
 use App\Http\Controllers\Api\Employee\EmployeePayslipController;
 use App\Http\Controllers\Api\Employee\EmployeeProfileController;
 use App\Http\Controllers\Api\Employee\LeaveRequestController;
 use App\Http\Controllers\Api\Employee\OvertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogController;
 use App\Http\Controllers\Api\Employee\UndertimeRequestController;
-use App\Http\Controllers\Api\Employee\EmployeeLeaveCreditController;
-use App\Http\Controllers\Api\Employee\EmployeeLeaveTypesController;
 use Illuminate\Support\Facades\Route;
 
 // Profile & Account Settings
@@ -18,14 +18,13 @@ Route::delete('/profile/photo', [EmployeeProfileController::class, 'deletePhoto'
 Route::match(['put', 'patch'], '/profile/contact', [EmployeeProfileController::class, 'updateContact']);
 Route::post('/profile/password', [EmployeeProfileController::class, 'updatePassword']);
 
-
 Route::get('/leave-credits', [EmployeeLeaveCreditController::class, 'index']);
-
 
 Route::get('/leave-types', [EmployeeLeaveTypesController::class, 'index']);
 
-//Requests
+// Requests
 Route::get('/leave-requests', [LeaveRequestController::class, 'index']);
+Route::post('/leave-requests/preview', [LeaveRequestController::class, 'preview']);
 Route::post('/leave-requests', [LeaveRequestController::class, 'store']);
 Route::match(['put', 'patch'], '/leave-requests/{leaveRequest}', [LeaveRequestController::class, 'update']);
 Route::patch('/leave-requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);

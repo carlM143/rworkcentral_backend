@@ -115,4 +115,11 @@ class Employee extends Model
     {
         return $this->hasMany(PayrollContribution::class);
     }
+
+
+    public function latestEmployment(): HasOne
+    {
+        return $this->hasOne(Employment::class)
+            ->latestOfMany();
+    }
 }

@@ -40,12 +40,32 @@ class LeaveRequestController extends Controller
         ]);
     }
 
+    public function preview(StoreLeaveRequest $request): JsonResponse
+    {
+        $employee = $this->authenticatedEmployee($request);
+        $validated = $request->validated();
+        $dates = $this->normalizeDates($employee, $validated);
+        $calendarDateCount = $this->selectedCalendarDateCount($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Leave schedule calculated successfully.',
+            'data' => [
+                'calendar_days' => $calendarDateCount,
+                'scheduled_working_days' => count($dates),
+                'excluded_rest_days' => max(0, $calendarDateCount - count($dates)),
+                'total_days' => round((float) collect($dates)->sum('day_value'), 2),
+                'dates' => $dates,
+            ],
+        ]);
+    }
+
     public function store(StoreLeaveRequest $request): JsonResponse
     {
         $employee = $this->authenticatedEmployee($request);
         $validated = $request->validated();
         $leaveType = $this->resolveActiveLeaveType($validated);
-        $dates = $this->normalizeDates($validated);
+        $dates = $this->normalizeDates($employee, $validated);
         $payType = $this->derivePayType($dates, $validated['requested_pay_type'] ?? null);
         $policy = $this->validateRequest($employee, $leaveType->id, $dates);
         $filePath = $this->handleFileUpload($request, $employee->id)
@@ -99,7 +119,7 @@ class LeaveRequestController extends Controller
         $this->ensureEmployeeOwnsPendingRequest($employee, $leaveRequest);
         $validated = $request->validated();
         $leaveType = $this->resolveActiveLeaveType($validated, $leaveRequest->leave_type_id);
-        $dates = $this->datesForUpdate($leaveRequest, $validated);
+        $dates = $this->datesForUpdate($employee, $leaveRequest, $validated);
         $payType = $this->derivePayType($dates, $validated['requested_pay_type'] ?? null);
         $policy = $this->validateRequest($employee, $leaveType->id, $dates, $leaveRequest->id);
         $newFilePath = $this->handleFileUpload($request, $employee->id);
@@ -220,7 +240,7 @@ class LeaveRequestController extends Controller
         return $leaveType;
     }
 
-    private function normalizeDates(array $validated): array
+    private function normalizeDates(Employee $employee, array $validated): array
     {
         $parentPayType = $validated['requested_pay_type'] ?? 'paid';
 
@@ -300,24 +320,53 @@ class LeaveRequestController extends Controller
             ]);
         }
 
-        return $dates->sortBy('leave_date')->values()->all();
+        $workingDates = $this->credits->filterWorkingDates(
+            $employee,
+            $dates->sortBy('leave_date')->values()->all()
+        );
+
+        if (empty($workingDates)) {
+            throw ValidationException::withMessages([
+                'dates' => 'The selected leave period contains no scheduled working days.',
+            ]);
+        }
+
+        return $workingDates;
     }
 
-    private function datesForUpdate(LeaveRequest $leaveRequest, array $validated): array
+    private function selectedCalendarDateCount(array $validated): int
     {
+        if (! empty($validated['dates'])) {
+            return count($validated['dates']);
+        }
+
+        $startDate = $validated['start_date']
+            ?? $validated['start']
+            ?? $validated['request_date']
+            ?? now()->toDateString();
+        $endDate = $validated['end_date'] ?? $validated['end'] ?? $startDate;
+
+        return Carbon::parse($startDate)->diffInDays(Carbon::parse($endDate)) + 1;
+    }
+
+    private function datesForUpdate(
+        Employee $employee,
+        LeaveRequest $leaveRequest,
+        array $validated
+    ): array {
         $hasNewDates = array_key_exists('dates', $validated)
             || isset($validated['start_date'])
             || isset($validated['start']);
 
         if ($hasNewDates) {
-            return $this->normalizeDates($validated);
+            return $this->normalizeDates($employee, $validated);
         }
 
         $requestedPayType = $validated['requested_pay_type'] ?? null;
         $existingDates = $leaveRequest->leaveDates()->orderBy('leave_date')->get();
 
         if ($existingDates->isEmpty()) {
-            return $this->normalizeDates([
+            return $this->normalizeDates($employee, [
                 'request_date' => $validated['request_date'] ?? $leaveRequest->request_date,
                 'requested_pay_type' => $requestedPayType ?? $leaveRequest->requested_pay_type,
             ]);

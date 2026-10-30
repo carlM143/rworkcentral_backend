@@ -23,7 +23,7 @@ class EmployeeLeaveCreditController extends Controller
 
         $employee = Employee::where('user_id', $user->id)->first();
 
-        if (!$employee) {
+        if (! $employee) {
             return response()->json([
                 'success' => false,
                 'message' => 'Employee record not found.',
@@ -35,7 +35,7 @@ class EmployeeLeaveCreditController extends Controller
             ->orderByDesc('id')
             ->first();
 
-        if (!$employment) {
+        if (! $employment) {
             return response()->json([
                 'success' => false,
                 'message' => 'Employee employment information not found.',
@@ -46,7 +46,7 @@ class EmployeeLeaveCreditController extends Controller
             $employment->employment_type_id
         );
 
-        if (!$employmentType) {
+        if (! $employmentType) {
             return response()->json([
                 'success' => false,
                 'message' => 'Employment type not found.',
@@ -116,8 +116,7 @@ class EmployeeLeaveCreditController extends Controller
             foreach ($groups as $payType => $group) {
                 $qualifiedPolicy = $group
                     ->filter(
-                        fn ($policy) =>
-                            (int) $policy->min_service_months <= $monthsOfService
+                        fn ($policy) => (int) $policy->min_service_months <= $monthsOfService
                     )
                     ->sortByDesc('min_service_months')
                     ->first();
@@ -125,15 +124,14 @@ class EmployeeLeaveCreditController extends Controller
                 $policy = $qualifiedPolicy
                     ?? $group->sortBy('min_service_months')->first();
 
-                if (!$policy) {
+                if (! $policy) {
                     continue;
                 }
 
-                $status = !$qualifiedPolicy
+                $status = ! $qualifiedPolicy
                     ? 'not_yet_eligible'
-                    : (!$policy->is_eligible ? 'not_eligible' : 'eligible');
+                    : (! $policy->is_eligible ? 'not_eligible' : 'eligible');
 
-                
                 $annualCredits = $status === 'eligible'
                     ? round((float) $policy->annual_credits, 2)
                     : 0;
@@ -179,7 +177,6 @@ class EmployeeLeaveCreditController extends Controller
                     }
                 }
 
-
                 $rows[] = [
                     'leave_type_id' => $leaveType->id,
                     'leave_code' => $leaveType->leave_code,
@@ -203,7 +200,7 @@ class EmployeeLeaveCreditController extends Controller
                 'employee_id' => $employee->id,
                 'emp_id' => $employee->emp_id,
                 'employee_name' => trim(
-                    $employee->firstname . ' ' . $employee->lastname
+                    $employee->firstname.' '.$employee->lastname
                 ),
                 'employment_type' => $employmentType->name,
                 'employment_type_id' => $employmentType->id,

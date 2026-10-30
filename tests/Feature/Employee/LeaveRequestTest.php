@@ -11,7 +11,9 @@ use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\Position;
 use App\Models\Role;
+use App\Models\ScheduleType;
 use App\Models\User;
+use App\Models\WorkSchedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -133,6 +135,128 @@ class LeaveRequestTest extends TestCase
             'employee_id' => $employee->id,
             'leave_type_id' => $leaveType->id,
             'status' => 'pending',
+        ]);
+    }
+
+    public function test_leave_range_excludes_non_working_schedule_days(): void
+    {
+        [$user, $employee, $leaveType, $leavePolicy] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $leavePolicy->update(['annual_credits' => 31]);
+        $this->assignMondayToFridaySchedule($employee);
+
+        $response = $this->postJson('/api/employee/leave-requests', [
+            'leave_type_id' => $leaveType->id,
+            'requested_pay_type' => 'paid',
+            'start_date' => '2026-11-01',
+            'end_date' => '2026-11-30',
+            'reason' => 'Maternity leave',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.start', '2026-11-02')
+            ->assertJsonPath('data.end', '2026-11-30')
+            ->assertJsonPath('data.total_days', 21)
+            ->assertJsonCount(21, 'data.dates');
+
+        $this->assertDatabaseMissing('leave_request_dates', [
+            'leave_request_id' => $response->json('data.raw_id'),
+            'leave_date' => '2026-11-01',
+        ]);
+        $this->assertDatabaseMissing('leave_request_dates', [
+            'leave_request_id' => $response->json('data.raw_id'),
+            'leave_date' => '2026-11-07',
+        ]);
+    }
+
+    public function test_explicit_leave_dates_also_exclude_non_working_schedule_days(): void
+    {
+        [$user, $employee, $leaveType] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $this->assignMondayToFridaySchedule($employee);
+
+        $response = $this->postJson('/api/employee/leave-requests', [
+            'leave_type_id' => $leaveType->id,
+            'requested_pay_type' => 'paid',
+            'dates' => [
+                [
+                    'leave_date' => '2026-11-01',
+                    'day_type' => 'whole_day',
+                    'requested_pay_type' => 'paid',
+                ],
+                [
+                    'leave_date' => '2026-11-02',
+                    'day_type' => 'whole_day',
+                    'requested_pay_type' => 'paid',
+                ],
+            ],
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.total_days', 1)
+            ->assertJsonCount(1, 'data.dates')
+            ->assertJsonPath('data.dates.0.leave_date', '2026-11-02');
+    }
+
+    public function test_employee_can_preview_schedule_aware_leave_day_count(): void
+    {
+        [$user, $employee, $leaveType] = $this->setupData();
+        Sanctum::actingAs($user);
+
+        $this->assignMondayToFridaySchedule($employee);
+
+        $response = $this->postJson('/api/employee/leave-requests/preview', [
+            'leave_type_id' => $leaveType->id,
+            'requested_pay_type' => 'paid',
+            'start_date' => '2026-11-01',
+            'end_date' => '2026-11-30',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.calendar_days', 30)
+            ->assertJsonPath('data.scheduled_working_days', 21)
+            ->assertJsonPath('data.excluded_rest_days', 9)
+            ->assertJsonPath('data.total_days', 21)
+            ->assertJsonCount(21, 'data.dates');
+    }
+
+    private function assignMondayToFridaySchedule(Employee $employee): void
+    {
+        $scheduleType = ScheduleType::create(['type_name' => 'Fixed']);
+        $schedule = WorkSchedule::create([
+            'schedule_type_id' => $scheduleType->id,
+            'schedule_code' => 'MON-FRI',
+            'schedule_name' => 'Monday to Friday',
+            'required_work_hours' => 8,
+            'grace_period' => 0,
+            'status' => true,
+        ]);
+
+        foreach ([
+            'Monday' => true,
+            'Tuesday' => true,
+            'Wednesday' => true,
+            'Thursday' => true,
+            'Friday' => true,
+            'Sat' => false,
+            'Sun' => false,
+        ] as $day => $isWorkingDay) {
+            if (! $isWorkingDay) {
+                continue;
+            }
+
+            $schedule->days()->create([
+                'day_of_week' => $day,
+                'is_working_day' => true,
+                'time_in' => '08:00',
+                'time_out' => '17:00',
+            ]);
+        }
+
+        $employee->employments()->latest('id')->firstOrFail()->update([
+            'work_schedule_id' => $schedule->id,
         ]);
     }
 

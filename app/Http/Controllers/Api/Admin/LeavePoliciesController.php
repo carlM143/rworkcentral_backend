@@ -51,7 +51,10 @@ class LeavePoliciesController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Leave policy retrieved successfully.',
-            'data' => $leavePolicy->load(['leaveType', 'employmentType']),
+            'data' => $leavePolicy->load([
+                'leaveType',
+                'employmentType'
+            ]),
         ]);
     }
 

@@ -12,7 +12,6 @@ class Employment extends Model
         'department_id',
         'position_id',
         'work_schedule_id',
-        'restday_id',
         'date_hired',
         'mobile',
         'residential_address',
@@ -48,10 +47,5 @@ class Employment extends Model
     public function workSchedule()
     {
         return $this->belongsTo(WorkSchedule::class);
-    }
-
-    public function restday()
-    {
-        return $this->belongsTo(RestDay::class, 'restday_id');
     }
 }

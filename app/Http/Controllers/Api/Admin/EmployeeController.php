@@ -20,7 +20,7 @@ class EmployeeController extends Controller
         'employments.department',
         'employments.position',
         'employments.workSchedule.scheduleType',
-        'employments.restday',
+        'employments.workSchedule.days',
     ];
 
     private const DETAIL_RELATIONSHIPS = [
@@ -31,7 +31,7 @@ class EmployeeController extends Controller
         'employments.department',
         'employments.position',
         'employments.workSchedule.scheduleType',
-        'employments.restday',
+        'employments.workSchedule.days',
 
         // Government Requirements
         'governmentRequirements',
@@ -146,4 +146,17 @@ class EmployeeController extends Controller
             'data' => $employee->fresh()->load(self::LIST_RELATIONSHIPS),
         ]);
     }
+
+    
+    public function reactivate(Employee $employee): JsonResponse
+    {
+        $employee->update(['status' => true]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employee reactivated successfully.',
+            'data' => $employee->fresh()->load(self::LIST_RELATIONSHIPS),
+        ]);
+    }
+
 }
