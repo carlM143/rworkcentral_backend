@@ -51,13 +51,22 @@ Route::apiResource('leave-types', LeaveTypesController::class);
 Route::apiResource('leave-policies', LeavePoliciesController::class);
 
 Route::get('leave-approvals', [LeaveApprovalController::class, 'index']);
+Route::post('leave-approvals', [LeaveApprovalController::class, 'store']);
 Route::patch('leave-approvals/{leaveRequest}/approve', [LeaveApprovalController::class, 'approve']);
+Route::patch('leave-approvals/{leaveRequest}/reject', [LeaveApprovalController::class, 'reject']);
+Route::patch('leave-approvals/{leaveRequest}/revert', [LeaveApprovalController::class, 'revert']);
 
 Route::get('overtime-requests', [OvertimeController::class, 'index']);
+Route::post('overtime-requests', [OvertimeController::class, 'store']);
 Route::patch('overtime-requests/{overtimeRequest}/approve', [OvertimeController::class, 'approve']);
+Route::patch('overtime-requests/{overtimeRequest}/reject', [OvertimeController::class, 'reject']);
+Route::patch('overtime-requests/{overtimeRequest}/revert', [OvertimeController::class, 'revert']);
 
 Route::get('undertime-requests', [UndertimeController::class, 'index']);
+Route::post('undertime-requests', [UndertimeController::class, 'store']);
 Route::patch('undertime-requests/{undertimeRequest}/approve', [UndertimeController::class, 'approve']);
+Route::patch('undertime-requests/{undertimeRequest}/reject', [UndertimeController::class, 'reject']);
+Route::patch('undertime-requests/{undertimeRequest}/revert', [UndertimeController::class, 'revert']);
 
 Route::get('leave-credit-transactions', [LeaveCreditTransactionController::class, 'index']);
 Route::get('leave-credit-balances', [LeaveCreditTransactionController::class, 'balances']);

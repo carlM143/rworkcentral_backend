@@ -85,6 +85,59 @@ class TimeRequestApprovalTest extends TestCase
         ]);
     }
 
+    public function test_authenticated_user_can_reject_overtime_and_undertime_requests(): void
+    {
+        $approver = User::factory()->create();
+        [$employee, $workSchedule] = $this->createEmployeeAndSchedule();
+
+        $overtimeRequest = OvertimeRequest::create([
+            'employee_id' => $employee->id,
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'OT-0002',
+            'ot_date' => '2026-10-28',
+            'start_at' => '2026-10-28 17:00:00',
+            'end_at' => '2026-10-28 19:00:00',
+            'reason' => 'Extra shift.',
+            'status' => 'pending',
+        ]);
+
+        $undertimeRequest = UndertimeRequest::create([
+            'employee_id' => $employee->id,
+            'work_schedule_id' => $workSchedule->id,
+            'request_no' => 'UT-0002',
+            'undertime_date' => '2026-10-28',
+            'requested_time_out' => '2026-10-28 16:00:00',
+            'scheduled_time_out' => '2026-10-28 17:00:00',
+            'requested_minutes' => 60,
+            'reason' => 'Errand.',
+            'status' => 'pending',
+        ]);
+
+        Sanctum::actingAs($approver);
+
+        $this->patchJson("/api/admin/overtime-requests/{$overtimeRequest->id}/reject")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.approved_by', $approver->id);
+
+        $this->patchJson("/api/admin/undertime-requests/{$undertimeRequest->id}/reject")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.approved_by', $approver->id);
+
+        $this->assertDatabaseHas('overtime_requests', [
+            'id' => $overtimeRequest->id,
+            'status' => 'rejected',
+            'approved_by' => $approver->id,
+        ]);
+
+        $this->assertDatabaseHas('undertime_requests', [
+            'id' => $undertimeRequest->id,
+            'status' => 'rejected',
+            'approved_by' => $approver->id,
+        ]);
+    }
+
     private function createEmployeeAndSchedule(): array
     {
         $employee = Employee::create([
