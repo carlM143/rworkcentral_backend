@@ -44,8 +44,6 @@ class ContributionRateScheduleController extends Controller
         if ($method === 'bracket') {
             $validated['employee_rate'] = null;
             $validated['employer_rate'] = null;
-            $validated['minimum_salary_base'] = null;
-            $validated['maximum_salary_base'] = null;
         }
 
         return $validated;
