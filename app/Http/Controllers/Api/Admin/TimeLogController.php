@@ -18,11 +18,20 @@ class TimeLogController extends Controller
             'department_id' => ['nullable', 'integer', 'min:1'],
             'status' => ['nullable', 'string', 'max:50'],
             'date_from' => ['nullable', 'date'],
-            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:1000'],
+            'date_to' => [
+                'nullable',
+                'date',
+                'after_or_equal:date_from',
+            ],
+            'limit' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:1000',
+            ],
         ]);
 
-        $limit = $validated['limit'] ?? 500;
+        $limit = (int) ($validated['limit'] ?? 500);
 
         $query = TimeLog::query()
             ->with('employee')
@@ -48,22 +57,45 @@ class TimeLogController extends Controller
         if (!empty($validated['department_id'])) {
             $departmentId = $validated['department_id'];
 
-            $query->whereHas('employee', function ($q) use ($departmentId) {
-                $q->where('department_id', $departmentId);
-            });
+            $query->whereHas(
+                'employee',
+                function ($q) use ($departmentId) {
+                    $q->where(
+                        'department_id',
+                        $departmentId
+                    );
+                }
+            );
         }
 
         if (!empty($validated['search'])) {
             $search = $validated['search'];
 
-            $query->whereHas('employee', function ($q) use ($search) {
-                $q->where(function ($employeeQuery) use ($search) {
-                    $employeeQuery
-                        ->where('firstname', 'like', "%{$search}%")
-                        ->orWhere('lastname', 'like', "%{$search}%")
-                        ->orWhere('emp_id', 'like', "%{$search}%");
-                });
-            });
+            $query->whereHas(
+                'employee',
+                function ($q) use ($search) {
+                    $q->where(
+                        function ($employeeQuery) use ($search) {
+                            $employeeQuery
+                                ->where(
+                                    'firstname',
+                                    'like',
+                                    "%{$search}%"
+                                )
+                                ->orWhere(
+                                    'lastname',
+                                    'like',
+                                    "%{$search}%"
+                                )
+                                ->orWhere(
+                                    'emp_id',
+                                    'like',
+                                    "%{$search}%"
+                                );
+                        }
+                    );
+                }
+            );
         }
 
         if (!empty($validated['status'])) {
@@ -79,27 +111,33 @@ class TimeLogController extends Controller
             ->pluck('department_name', 'id')
             ->all();
 
-        $data = $logs->map(function (TimeLog $log) use ($departmentNames) {
-            return $this->transformLog($log, $departmentNames);
-        });
+        $data = $logs->map(
+            fn (TimeLog $log) => $this->transformLog(
+                $log,
+                $departmentNames
+            )
+        )->values();
 
         $stats = [
             'total_logs' => $data->count(),
-            'complete_logs' => $data->where('status', 'Complete')->count(),
-            'missing_logs' => $data->where('status', 'Missing')->count(),
-            'with_issues' => $data->filter(function ($row) {
-                return in_array($row['status'], [
-                    'Late',
-                    'Undertime',
-                    'Incomplete',
-                ], true);
-            })->count(),
+
+            'complete_logs' => $data->filter(
+                fn ($row) => $row['attendance_status'] === 'Complete'
+            )->count(),
+
+            'missing_logs' => $data->filter(
+                fn ($row) => $row['attendance_status'] === 'Missing'
+            )->count(),
+
+            'with_issues' => $data->filter(
+                fn ($row) => $row['has_issues']
+            )->count(),
         ];
 
         return response()->json([
             'success' => true,
             'message' => 'Time logs retrieved successfully.',
-            'data' => $data->values(),
+            'data' => $data,
             'stats' => $stats,
             'meta' => [
                 'count' => $data->count(),
@@ -139,49 +177,135 @@ class TimeLogController extends Controller
 
         $departmentId = $employee?->department_id;
 
-        $lateMinutes = (int) ($log->late_minutes ?? 0);
-        $undertimeMinutes = (int) ($log->undertime_minutes ?? 0);
-        $workedMinutes = $log->worked_minutes;
+        // Historical records may not have schedule snapshots.
+        $rawLateMinutes = $log->raw_late_minutes !== null
+            ? (int) $log->raw_late_minutes
+            : (int) ($log->late_minutes ?? 0);
+
+        $graceMinutes = $log->grace_period_minutes !== null
+            ? (int) $log->grace_period_minutes
+            : null;
+
+        $chargeableLateMinutes =
+            $log->chargeable_late_minutes !== null
+                ? (int) $log->chargeable_late_minutes
+                : null;
+
+        // Preserve original values for historical attendance.
+        $effectiveLateMinutes = $chargeableLateMinutes
+            ?? $rawLateMinutes;
+
+        $undertimeMinutes = (int) (
+            $log->undertime_minutes ?? 0
+        );
+
+        $workedMinutes = $log->worked_minutes !== null
+            ? (int) $log->worked_minutes
+            : null;
+
+        $attendanceStatus = $this->attendanceStatus($log);
+
+        $hasIssues = in_array(
+            $attendanceStatus,
+            ['Missing', 'Incomplete'],
+            true
+        ) ||
+            $effectiveLateMinutes > 0 ||
+            $undertimeMinutes > 0;
 
         return [
             'id' => $log->id,
             'employee_id' => $log->employee_id,
-            'employee_number' => $employee?->emp_id ?? '',
-            'employee_name' => $employeeName ?: 'Unknown Employee',
+
+            'employee_number' =>
+                $employee?->emp_id ?? '',
+
+            'employee_name' =>
+                $employeeName ?: 'Unknown Employee',
 
             'department_id' => $departmentId,
-            'department' => $departmentNames[$departmentId]
-                ?? 'Unassigned',
+
+            'department' =>
+                $departmentNames[$departmentId]
+                    ?? 'Unassigned',
 
             'work_date' => $log->work_date
-                ? Carbon::parse($log->work_date)->format('Y-m-d')
+                ? Carbon::parse(
+                    $log->work_date
+                )->format('Y-m-d')
                 : null,
 
-            // Temporary schedule display for dummy records.
-            'schedule' => '8:00 AM - 5:00 PM',
+            // Actual schedule snapshot saved during import.
+            'work_schedule_id' =>
+                $log->work_schedule_id,
 
-            'time_in' => $this->formatTime($log->time_in),
-            'time_out' => $this->formatTime($log->time_out),
-            'break_out' => $this->formatTime($log->break_out),
-            'break_in' => $this->formatTime($log->break_in),
+            'scheduled_time_in' =>
+                $this->formatTime(
+                    $log->scheduled_time_in
+                ),
 
-            'late_minutes' => $lateMinutes,
-            'undertime_minutes' => $undertimeMinutes,
-            'worked_minutes' => $workedMinutes !== null
-                ? (int) $workedMinutes
-                : null,
+            'scheduled_time_out' =>
+                $this->formatTime(
+                    $log->scheduled_time_out
+                ),
+
+            'schedule' => $this->formatSchedule($log),
+
+            'time_in' =>
+                $this->formatTime($log->time_in),
+
+            'time_out' =>
+                $this->formatTime($log->time_out),
+
+            'break_out' =>
+                $this->formatTime($log->break_out),
+
+            'break_in' =>
+                $this->formatTime($log->break_in),
+
+            // Legacy value remains available for compatibility.
+            'late_minutes' => $rawLateMinutes,
+
+            'raw_late_minutes' => $rawLateMinutes,
+
+            'grace_period_minutes' => $graceMinutes,
+
+            'chargeable_late_minutes' =>
+                $chargeableLateMinutes,
+
+            // The value shown in the Late column.
+            'effective_late_minutes' =>
+                $effectiveLateMinutes,
+
+            'undertime_minutes' =>
+                $undertimeMinutes,
+
+            'worked_minutes' => $workedMinutes,
 
             'worked_hours' => $workedMinutes !== null
-                ? round((int) $workedMinutes / 60, 2)
+                ? round($workedMinutes / 60, 2)
                 : null,
 
-            'overtime_minutes' => (int) ($log->overtime_minutes ?? 0),
+            'overtime_minutes' => (int) (
+                $log->overtime_minutes ?? 0
+            ),
 
+            // Retain the original backend status.
             'status' => $this->resolveStatus($log),
+
+            // Separate punch completeness from violations.
+            'attendance_status' => $attendanceStatus,
+
+            'has_issues' => $hasIssues,
+
             'source' => $log->source,
             'remarks' => $log->remarks,
-            'created_at' => $log->created_at?->toDateTimeString(),
-            'updated_at' => $log->updated_at?->toDateTimeString(),
+
+            'created_at' =>
+                $log->created_at?->toDateTimeString(),
+
+            'updated_at' =>
+                $log->updated_at?->toDateTimeString(),
         ];
     }
 
@@ -194,13 +318,63 @@ class TimeLogController extends Controller
         return Carbon::parse($value)->format('h:i A');
     }
 
+    private function formatSchedule(TimeLog $log): ?string
+    {
+        if (
+            !$log->scheduled_time_in ||
+            !$log->scheduled_time_out
+        ) {
+            // Do not invent historical schedule values.
+            return null;
+        }
+
+        return $this->formatTime(
+            $log->scheduled_time_in
+        ) . ' - ' . $this->formatTime(
+            $log->scheduled_time_out
+        );
+    }
+
+    private function attendanceStatus(TimeLog $log): string
+    {
+        $status = strtolower(
+            trim((string) $log->status)
+        );
+
+        if (in_array($status, ['on leave', 'leave'], true)) {
+            return 'On Leave';
+        }
+
+        if ($status === 'rest day') {
+            return 'Rest Day';
+        }
+
+        if (in_array($status, ['missing', 'absent'], true)) {
+            return 'Missing';
+        }
+
+        if ($status === 'incomplete') {
+            return 'Incomplete';
+        }
+
+        if (!$log->time_in && !$log->time_out) {
+            return 'Missing';
+        }
+
+        if (!$log->time_in || !$log->time_out) {
+            return 'Incomplete';
+        }
+
+        return 'Complete';
+    }
+
     private function resolveStatus(TimeLog $log): string
     {
         $status = strtolower(
             trim((string) $log->status)
         );
 
-        if ($status === 'missing' || $status === 'absent') {
+        if (in_array($status, ['missing', 'absent'], true)) {
             return 'Missing';
         }
 
@@ -216,8 +390,12 @@ class TimeLogController extends Controller
             return 'Undertime';
         }
 
-        if ($status === 'complete' || $status === 'completed') {
+        if (in_array($status, ['complete', 'completed'], true)) {
             return 'Complete';
+        }
+
+        if ($status === 'on leave' || $status === 'rest day') {
+            return ucwords($status);
         }
 
         if (!$log->time_in && !$log->time_out) {
@@ -228,7 +406,11 @@ class TimeLogController extends Controller
             return 'Incomplete';
         }
 
-        if ((int) $log->late_minutes > 0) {
+        $effectiveLate = $log->chargeable_late_minutes
+            ?? $log->late_minutes
+            ?? 0;
+
+        if ((int) $effectiveLate > 0) {
             return 'Late';
         }
 
