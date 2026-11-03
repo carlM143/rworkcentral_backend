@@ -52,7 +52,8 @@ Route::apiResource('contribution-types', ContributionTypeController::class);
 Route::apiResource('contribution-rate-schedules', ContributionRateScheduleController::class);
 Route::apiResource('contribution-rate-brackets', ContributionRateBracketController::class);
 Route::apiResource('contribution-deduction-settings', ContributionDeductionSettingController::class);
-Route::get('companies', [CompanyController::class, 'index']);
+Route::apiResource('companies', CompanyController::class);
+Route::get('company/current', [CompanyController::class, 'current']);
 
 Route::get('salary-types', [SalaryTypeController::class, 'index']);
 Route::get('payroll-groups', [PayrollGroupController::class, 'index']);
