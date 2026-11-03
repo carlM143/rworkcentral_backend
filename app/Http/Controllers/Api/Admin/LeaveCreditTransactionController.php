@@ -59,8 +59,9 @@ class LeaveCreditTransactionController extends Controller
         $employees = Employee::query()
             ->with([
                 'department:id,department_name,department_code',
-                'employments:id,employee_id,employment_type_id,date_hired',
+                'employments:id,employee_id,employment_type_id,position_id,date_hired',
                 'employments.employmentType:id,name',
+                'employments.position:id,position',
             ])
             ->when($filters['employee_id'] ?? null, fn ($query, $id) => $query->whereKey($id))
             ->when($filters['department_id'] ?? null, fn ($query, $id) => $query->where('department_id', $id))
@@ -118,8 +119,8 @@ class LeaveCreditTransactionController extends Controller
                     ->where('policies.leave_type_id', $policy->leave_type_id)
                     ->where('policies.employment_type_id', $employment->employment_type_id)
                     ->where('policies.is_paid', true)
-                    ->where('transactions.cycle_start', $cycleStart)
-                    ->where('transactions.cycle_end', $cycleEnd)
+                    ->whereDate('transactions.cycle_start', $cycleStart)
+                    ->whereDate('transactions.cycle_end', $cycleEnd)
                     ->selectRaw('COUNT(transactions.id) as transaction_count')
                     ->selectRaw("SUM(CASE WHEN transactions.transaction_type = 'allocation' THEN transactions.days_delta ELSE 0 END) as ledger_allocated")
                     ->selectRaw("SUM(CASE WHEN transactions.transaction_type = 'deduction' THEN ABS(transactions.days_delta) ELSE 0 END) as gross_deductions")
@@ -153,10 +154,20 @@ class LeaveCreditTransactionController extends Controller
                     ] : null,
                     'employment_type_id' => $employment->employment_type_id,
                     'employment_type' => $employment->employmentType?->name,
+                    'position_id' => $employment->position?->id,
+                    'position' => $employment->position?->position,
+                    'position_name' => $employment->position?->position,
+                    'position_details' => $employment->position ? [
+                        'id' => $employment->position->id,
+                        'position' => $employment->position->position,
+                    ] : null,
                     'leave_type_id' => $policy->leave_type_id,
                     'leave_code' => $policy->leaveType?->leave_code,
                     'leave_policy_id' => $policy->id,
                     'leave_type' => $policy->leaveType?->leave_name,
+                    'policy_paid' => (bool) $policy->is_paid,
+                    'policy_eligible' => (bool) $policy->is_eligible,
+                    'policy_status' => $policy->status,
                     'cycle_start' => $cycleStart,
                     'cycle_end' => $cycleEnd,
                     'allocated' => $allocated,

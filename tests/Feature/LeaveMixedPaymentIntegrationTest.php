@@ -355,19 +355,86 @@ class LeaveMixedPaymentIntegrationTest extends TestCase
             ->assertOk()
             ->assertJsonCount(2, 'data')
             ->assertJsonPath('data.0.leave_type', 'Paternity Leave')
+            ->assertJsonPath('data.0.policy_paid', true)
+            ->assertJsonPath('data.0.policy_eligible', true)
+            ->assertJsonPath('data.0.policy_status', 'approved')
             ->assertJsonPath('data.0.allocated', 15)
             ->assertJsonPath('data.0.available', 15)
             ->assertJsonPath('data.0.has_ledger_transactions', false)
             ->assertJsonPath('data.1.leave_type', 'Sick Leave')
+            ->assertJsonPath('data.1.policy_paid', true)
             ->assertJsonPath('data.1.department', 'Human Resources')
             ->assertJsonPath('data.1.department_name', 'Human Resources')
             ->assertJsonPath('data.1.department_code', 'HR')
             ->assertJsonPath('data.1.department_details.department_name', 'Human Resources')
+            ->assertJsonPath('data.1.position', 'HR Assistant')
+            ->assertJsonPath('data.1.position_name', 'HR Assistant')
+            ->assertJsonPath('data.1.position_details.position', 'HR Assistant')
             ->assertJsonPath('data.1.used', 1)
             ->assertJsonPath('data.1.deductions', 1)
             ->assertJsonPath('data.1.gross_deductions', 2)
             ->assertJsonPath('data.1.restored_days', 1)
             ->assertJsonPath('data.1.available', 4);
+    }
+
+    public function test_admin_can_file_and_auto_approve_paid_leave_for_selected_employee(): void
+    {
+        $data = $this->setupLeaveData(5);
+        Sanctum::actingAs($data['admin']);
+
+        $payload = [
+            'employee_id' => $data['employee']->id,
+            'leave_type_id' => $data['leaveType']->id,
+            'requested_pay_type' => 'paid',
+            'reason' => 'Leave filed by HR for employee',
+            'dates' => $this->dates(1, 'paid'),
+        ];
+
+        $this->postJson('/api/admin/leave-approvals/preview', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.employee_id', $data['employee']->id)
+            ->assertJsonPath('data.total_days', 1)
+            ->assertJsonPath('data.total_paid_days', 1);
+
+        $response = $this->postJson('/api/admin/leave-approvals', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.employee.id', $data['employee']->id)
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.requested_pay_type', 'paid')
+            ->assertJsonPath('data.approved_pay_type', 'paid')
+            ->assertJsonPath('data.total_requested_days', 1);
+
+        $this->assertDatabaseHas('leave_requests', [
+            'id' => $response->json('data.id'),
+            'employee_id' => $data['employee']->id,
+            'status' => 'approved',
+            'approved_by' => $data['admin']->id,
+        ]);
+        $this->assertSame(4.0, $this->ledgerBalance($data['employee'], $data['leaveType']));
+    }
+
+    public function test_admin_can_file_unpaid_leave_without_policy_or_credit_deduction(): void
+    {
+        $data = $this->setupLeaveData(null);
+        Sanctum::actingAs($data['admin']);
+
+        $response = $this->postJson('/api/admin/leave-approvals', [
+            'employee_id' => $data['employee']->id,
+            'leave_type_id' => $data['leaveType']->id,
+            'requested_pay_type' => 'unpaid',
+            'dates' => $this->dates(1, 'unpaid'),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.leave_policy_id', null)
+            ->assertJsonPath('data.approved_pay_type', 'unpaid');
+
+        $this->assertDatabaseCount('leave_credit_transactions', 0);
+        $this->assertDatabaseHas('leave_request_dates', [
+            'leave_request_id' => $response->json('data.id'),
+            'requested_pay_type' => 'unpaid',
+            'approved_pay_type' => 'unpaid',
+        ]);
     }
 
     private function setupLeaveData(

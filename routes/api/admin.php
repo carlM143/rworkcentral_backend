@@ -3,13 +3,14 @@
 use App\Http\Controllers\Api\Admin\CompanyController;
 use App\Http\Controllers\Api\Admin\ContributionDeductionSettingController;
 use App\Http\Controllers\Api\Admin\ContributionRateBracketController;
-use App\Http\Controllers\Api\Admin\ContributionTypeController;
 use App\Http\Controllers\Api\Admin\ContributionRateScheduleController;
+use App\Http\Controllers\Api\Admin\ContributionTypeController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\EmployeeController;
 use App\Http\Controllers\Api\Admin\EmploymentDocumentsController;
 use App\Http\Controllers\Api\Admin\EmploymentTypeController;
 use App\Http\Controllers\Api\Admin\LeaveApprovalController;
+use App\Http\Controllers\Api\Admin\LeaveCreditTransactionController;
 use App\Http\Controllers\Api\Admin\LeavePoliciesController;
 use App\Http\Controllers\Api\Admin\LeaveTypesController;
 use App\Http\Controllers\Api\Admin\OvertimeController;
@@ -20,20 +21,16 @@ use App\Http\Controllers\Api\Admin\SalaryTypeController;
 use App\Http\Controllers\Api\Admin\ScheduleController;
 use App\Http\Controllers\Api\Admin\ScheduleTypeController;
 use App\Http\Controllers\Api\Admin\SystemUserController;
-use App\Http\Controllers\Api\Admin\UndertimeController;
-use App\Http\Controllers\Api\Admin\LeaveCreditTransactionController;
 use App\Http\Controllers\Api\Admin\TimeLogController;
-use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
-
-
+use App\Http\Controllers\Api\Admin\TimeLogImportController;
+use App\Http\Controllers\Api\Admin\UndertimeController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/employees', [EmployeeController::class, 'index']);
 Route::post('/employees', [EmployeeController::class, 'store']);
 Route::get('/employees/{employee}', [EmployeeController::class, 'show']);
-Route::patch('/employees/{employee}/reactivate',[EmployeeController::class, 'reactivate']);
-
+Route::patch('/employees/{employee}/reactivate', [EmployeeController::class, 'reactivate']);
 
 Route::match(['put', 'patch'], '/employees/{employee}', [EmployeeController::class, 'update']);
 Route::patch('/employees/{employee}/deactivate', [EmployeeController::class, 'deactivate']);
@@ -65,6 +62,7 @@ Route::apiResource('leave-types', LeaveTypesController::class);
 Route::apiResource('leave-policies', LeavePoliciesController::class);
 
 Route::get('leave-approvals', [LeaveApprovalController::class, 'index']);
+Route::post('leave-approvals/preview', [LeaveApprovalController::class, 'preview']);
 Route::post('leave-approvals', [LeaveApprovalController::class, 'store']);
 Route::patch('leave-approvals/{leaveRequest}/approve', [LeaveApprovalController::class, 'approve']);
 Route::patch('leave-approvals/{leaveRequest}/reject', [LeaveApprovalController::class, 'reject']);
@@ -127,5 +125,3 @@ Route::patch(
     'time-log-corrections/{correction}/reject',
     [TimeLogCorrectionRequestController::class, 'reject']
 );
-
-
