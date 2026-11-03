@@ -124,4 +124,23 @@ class User extends Authenticatable
     {
         return $this->hasMany(EmployeeLoanTransaction::class, 'created_by');
     }
+
+    public function hasPrivilege(
+        string $module,
+        string $name
+    ): bool {
+        if (!$this->role_id) {
+            return false;
+        }
+
+        return $this->role()
+            ->whereHas('privileges', function ($query) use (
+                $module,
+                $name
+            ) {
+                $query->where('module', $module)
+                    ->where('name', $name);
+            })
+            ->exists();
+    }
 }

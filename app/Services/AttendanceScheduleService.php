@@ -8,12 +8,6 @@ use Illuminate\Support\Carbon;
 
 class AttendanceScheduleService
 {
-    /**
-     * Resolve the employee's applicable work schedule.
-     *
-     * No hardcoded shift or grace period.
-     * Returns null when a reliable schedule is unavailable.
-     */
     public function resolve(
         int $employeeId,
         string $workDate

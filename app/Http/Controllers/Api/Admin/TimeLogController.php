@@ -13,6 +13,8 @@ class TimeLogController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorizeTimekeeping($request, 'view');
+
         $validated = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'department_id' => ['nullable', 'integer', 'min:1'],
@@ -146,9 +148,10 @@ class TimeLogController extends Controller
         ]);
     }
 
-    public function show(TimeLog $timeLog): JsonResponse
-    {
-        $timeLog->load('employee');
+    public function show( Request $request, TimeLog $timeLog): JsonResponse {
+    $this->authorizeTimekeeping($request, 'view');
+
+    $timeLog->load('employee');
 
         $departmentNames = DB::table('departments')
             ->pluck('department_name', 'id')
@@ -419,5 +422,22 @@ class TimeLogController extends Controller
         }
 
         return 'Complete';
+    }
+
+    private function authorizeTimekeeping(Request $request,string $privilege): void 
+    {
+        $user = $request->user();
+
+        abort_unless(
+            $user
+            && in_array(
+                $user->role?->name,
+                ['Administrator', 'Human Resources'],
+                true
+            )
+            && $user->hasPrivilege('timekeeping', $privilege),
+            403,
+            'You are not authorized to access this timekeeping resource.'
+        );
     }
 }

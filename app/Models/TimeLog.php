@@ -62,4 +62,15 @@ class TimeLog extends Model
     {
         return $this->hasMany(UndertimeRequest::class);
     }
+
+    public function lateAdjustments()
+    {
+        return $this->hasMany(LateAdjustment::class);
+    }
+
+    public function latestLateAdjustment()
+    {
+        return $this->hasOne(LateAdjustment::class)
+            ->latestOfMany();
+    }
 }

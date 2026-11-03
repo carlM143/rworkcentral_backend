@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Admin\LeaveCreditTransactionController;
 use App\Http\Controllers\Api\Admin\TimeLogController;
 use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
+use App\Http\Controllers\Api\Admin\LateAdjustmentController;
 
 
 use Illuminate\Support\Facades\Route;
@@ -75,6 +76,7 @@ Route::get('leave-credit-transactions', [LeaveCreditTransactionController::class
 Route::get('leave-credit-balances', [LeaveCreditTransactionController::class, 'balances']);
 Route::post('leave-credit-transactions/adjust', [LeaveCreditTransactionController::class, 'adjust']);
 
+
 // ============================================
 // TIME LOGS
 // ============================================
@@ -116,5 +118,34 @@ Route::patch(
     'time-log-corrections/{correction}/reject',
     [TimeLogCorrectionRequestController::class, 'reject']
 );
+
+// ============================================
+// LATE ADJUSTMENTS
+// ============================================
+
+Route::get('late-adjustments', [
+    LateAdjustmentController::class,
+    'index',
+]);
+
+Route::post('late-adjustments', [
+    LateAdjustmentController::class,
+    'store',
+]);
+
+Route::get('late-adjustments/{lateAdjustment}', [
+    LateAdjustmentController::class,
+    'show',
+]);
+
+Route::patch('late-adjustments/{lateAdjustment}/approve', [
+    LateAdjustmentController::class,
+    'approve',
+]);
+
+Route::patch('late-adjustments/{lateAdjustment}/reject', [
+    LateAdjustmentController::class,
+    'reject',
+]);
 
 

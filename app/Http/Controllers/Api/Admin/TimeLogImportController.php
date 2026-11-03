@@ -26,10 +26,12 @@ class TimeLogImportController extends Controller
     ];
 
     public function store(
-        Request $request,
-        AttendanceScheduleService $scheduleService
-    ): JsonResponse {
-        $validated = $request->validate([
+    Request $request,
+    AttendanceScheduleService $scheduleService
+): JsonResponse {
+    $this->authorizeTimekeeping($request, 'import');
+
+    $validated = $request->validate([
             'file' => ['required', 'file', 'max:5120'],
             'replace_existing' => ['nullable', 'boolean'],
         ]);
@@ -533,5 +535,24 @@ class TimeLogImportController extends Controller
         }
 
         return null;
+    }
+
+    private function authorizeTimekeeping(
+        Request $request,
+        string $privilege
+    ): void {
+        $user = $request->user();
+
+        abort_unless(
+            $user
+            && in_array(
+                $user->role?->name,
+                ['Administrator', 'Human Resources'],
+                true
+            )
+            && $user->hasPrivilege('timekeeping', $privilege),
+            403,
+            'You are not authorized to perform this timekeeping action.'
+        );
     }
 }
