@@ -13,10 +13,11 @@ class EmploymentTypeSeeder extends Seeder
     public function run(): void
     {
         $employmentTypes = [
+            'Part-Time',
+            'Contractual',
             'Regular',
             'Probationary',
-            'Contractual',
-            'Part-Time',
+            'Training',
         ];
 
         foreach ($employmentTypes as $employmentType) {
