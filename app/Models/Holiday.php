@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 class Holiday extends Model
 {
     protected $fillable = [
+        'company_id',
+        'applies_to',
+        'is_working_day',
         'user_id',
         'holiday_type_id',
         'holiday_name',
@@ -21,12 +24,18 @@ class Holiday extends Model
         return [
             'holiday_date' => 'date',
             'status' => 'boolean',
+            'is_working_day' => 'boolean',
         ];
     }
 
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function locations()
+    {
+        return $this->belongsToMany(Location::class, 'holiday_locations');
     }
 
     public function holidayType()

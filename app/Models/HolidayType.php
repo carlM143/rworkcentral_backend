@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class HolidayType extends Model
 {
     protected $fillable = [
+        'type_code',
+        'type_name',
         'user_id',
         'holiday_type_name',
         'description',

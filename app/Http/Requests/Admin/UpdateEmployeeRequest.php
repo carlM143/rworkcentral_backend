@@ -41,6 +41,7 @@ class UpdateEmployeeRequest extends FormRequest
             'employment.department_id' => ['sometimes', 'required', 'integer', Rule::exists('departments', 'id')],
             'employment.position_id' => ['sometimes', 'required', 'integer', Rule::exists('positions', 'id')],
             'employment.work_schedule_id' => ['nullable', 'integer', Rule::exists('work_schedules', 'id')],
+            'employment.location_id' => ['nullable', 'integer', Rule::exists('locations', 'id')->where('company_id', Department::find($this->input('employment.department_id', $this->route('employee')?->department_id))?->company_id)],
             'employment.date_hired' => ['sometimes', 'required', 'date'],
 
             // Salary Setup - Optional

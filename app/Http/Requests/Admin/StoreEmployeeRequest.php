@@ -41,6 +41,7 @@ class StoreEmployeeRequest extends FormRequest
             'employment.department_id' => ['required', 'integer', Rule::exists('departments', 'id')],
             'employment.position_id' => ['required', 'integer', Rule::exists('positions', 'id')],
             'employment.work_schedule_id' => ['nullable', 'integer', Rule::exists('work_schedules', 'id')],
+            'employment.location_id' => ['nullable', 'integer', Rule::exists('locations', 'id')->where('company_id', Department::find($this->input('employment.department_id'))?->company_id)],
             'employment.date_hired' => ['required', 'date'],
 
             // Government Requirements - Optional
