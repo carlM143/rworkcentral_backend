@@ -11,8 +11,6 @@ class WorkSchedule extends Model
         'schedule_type_id',
         'schedule_code',
         'schedule_name',
-        'time_in',
-        'time_out',
         'required_work_hours',
         'grace_period',
         'break_start',

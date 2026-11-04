@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Employee;
 use App\Models\OvertimeRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class OvertimeController extends Controller
@@ -14,17 +17,11 @@ class OvertimeController extends Controller
     public function index(): JsonResponse
     {
         $requests = OvertimeRequest::query()
-            ->with([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog:id,employee_id,work_date,time_in,time_out,overtime_minutes,status',
-                'approver:id,name,email',
-            ])
+            ->with($this->responseRelations())
             ->latest('id')
             ->get();
+
+        $requests->each(fn (OvertimeRequest $overtimeRequest) => $this->appendCurrentPosition($overtimeRequest));
 
         return response()->json([
             'success' => true,
@@ -58,15 +55,9 @@ class OvertimeController extends Controller
                 'approved_at' => now(),
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -95,15 +86,9 @@ class OvertimeController extends Controller
                 'approved_at' => now(),
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -124,21 +109,16 @@ class OvertimeController extends Controller
             'image' => 'nullable',
         ]);
 
-        $employee = \App\Models\Employee::findOrFail($validated['employee_id']);
-        $scheduleId = $employee->employments()->latest('id')->first()?->work_schedule_id
-            ?? \App\Models\WorkSchedule::first()?->id;
+        $employee = Employee::findOrFail($validated['employee_id']);
+        $scheduleId = $employee->employments()->latest('id')->first()?->work_schedule_id;
 
-        if (!$scheduleId) {
-            $fallback = \App\Models\WorkSchedule::create([
-                'schedule_code' => 'STD-DEF',
-                'schedule_name' => 'Standard Regular Schedule',
-                'time_in' => '09:00:00',
-                'time_out' => '18:00:00',
+        if (! $scheduleId) {
+            throw ValidationException::withMessages([
+                'employee_id' => 'The selected employee does not have an assigned work schedule.',
             ]);
-            $scheduleId = $fallback->id;
         }
 
-        $requestNo = 'OT-' . date('Ymd') . '-' . strtoupper(\Illuminate\Support\Str::random(6));
+        $requestNo = 'OT-'.date('Ymd').'-'.strtoupper(Str::random(6));
         $filePath = $this->handleFileUpload($request, $validated['employee_id']);
 
         $overtimeRequest = OvertimeRequest::create([
@@ -154,6 +134,10 @@ class OvertimeController extends Controller
             'approved_by' => $request->user()->id,
             'approved_at' => now(),
         ]);
+
+        $overtimeRequest = $this->appendCurrentPosition(
+            $overtimeRequest->fresh($this->responseRelations())
+        );
 
         return response()->json([
             'success' => true,
@@ -185,9 +169,10 @@ class OvertimeController extends Controller
                 $binary = base64_decode($imageData, true);
 
                 if ($binary !== false) {
-                    $fileName = 'req_' . time() . '_' . \Illuminate\Support\Str::random(10) . '.' . $extension;
+                    $fileName = 'req_'.time().'_'.Str::random(10).'.'.$extension;
                     $path = "requests/{$employeeId}/{$fileName}";
-                    \Illuminate\Support\Facades\Storage::disk('public')->put($path, $binary);
+                    Storage::disk('public')->put($path, $binary);
+
                     return $path;
                 }
             }
@@ -198,7 +183,7 @@ class OvertimeController extends Controller
 
     public function revert(Request $request, OvertimeRequest $overtimeRequest): JsonResponse
     {
-        $reverted = DB::transaction(function () use ($request, $overtimeRequest): OvertimeRequest {
+        $reverted = DB::transaction(function () use ($overtimeRequest): OvertimeRequest {
             $record = OvertimeRequest::query()
                 ->lockForUpdate()
                 ->findOrFail($overtimeRequest->id);
@@ -209,15 +194,9 @@ class OvertimeController extends Controller
                 'approved_at' => null,
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -225,5 +204,41 @@ class OvertimeController extends Controller
             'message' => 'Overtime request reverted to pending successfully.',
             'data' => $reverted,
         ]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function responseRelations(): array
+    {
+        return [
+            'employee:id,emp_id,firstname,middlename,lastname,department_id',
+            'employee.department:id,department_name',
+            'employee.employments.department:id,department_name',
+            'employee.employments.position:id,position',
+            'employee.latestEmployment',
+            'employee.latestEmployment.position:id,position',
+            'workSchedule:id,schedule_code,schedule_name,required_work_hours,grace_period,break_start,break_end,status',
+            'workSchedule.days:id,work_schedule_id,day_of_week,is_working_day,time_in,time_out',
+            'timeLog:id,employee_id,work_date,time_in,time_out,overtime_minutes,status',
+            'approver:id,name,email',
+        ];
+    }
+
+    private function appendCurrentPosition(OvertimeRequest $overtimeRequest): OvertimeRequest
+    {
+        $employee = $overtimeRequest->employee;
+        $position = $employee?->latestEmployment?->position;
+
+        if ($employee) {
+            $employee->setAttribute('position_id', $position?->id);
+            $employee->setAttribute('position', $position?->position);
+            $employee->setAttribute('position_details', $position ? [
+                'id' => $position->id,
+                'position' => $position->position,
+            ] : null);
+        }
+
+        return $overtimeRequest;
     }
 }

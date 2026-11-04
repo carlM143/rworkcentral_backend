@@ -7,16 +7,21 @@ use App\Http\Controllers\Api\Admin\ContributionRateScheduleController;
 use App\Http\Controllers\Api\Admin\ContributionTypeController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\EmployeeController;
+use App\Http\Controllers\Api\Admin\EmployeeLoanController;
+use App\Http\Controllers\Api\Admin\EmployeeLoanTransactionController;
+use App\Http\Controllers\Api\Admin\EmployeeSalaryRateController;
 use App\Http\Controllers\Api\Admin\EmploymentDocumentsController;
 use App\Http\Controllers\Api\Admin\EmploymentTypeController;
 use App\Http\Controllers\Api\Admin\LeaveApprovalController;
 use App\Http\Controllers\Api\Admin\LeaveCreditTransactionController;
 use App\Http\Controllers\Api\Admin\LeavePoliciesController;
 use App\Http\Controllers\Api\Admin\LeaveTypesController;
+use App\Http\Controllers\Api\Admin\LoanTypesController;
 use App\Http\Controllers\Api\Admin\OvertimeController;
 use App\Http\Controllers\Api\Admin\PayrollGroupController;
 use App\Http\Controllers\Api\Admin\PayrollPeriodController;
 use App\Http\Controllers\Api\Admin\PositionController;
+use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
 use App\Http\Controllers\Api\Admin\SalaryTypeController;
 use App\Http\Controllers\Api\Admin\ScheduleController;
 use App\Http\Controllers\Api\Admin\ScheduleTypeController;
@@ -27,6 +32,10 @@ use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/employees/filter-options', [
+    EmployeeController::class,
+    'filterOptions',
+]);
 Route::get('/employees', [EmployeeController::class, 'index']);
 Route::post('/employees', [EmployeeController::class, 'store']);
 Route::get('/employees/{employee}', [EmployeeController::class, 'show']);
@@ -84,6 +93,65 @@ Route::patch('undertime-requests/{undertimeRequest}/revert', [UndertimeControlle
 Route::get('leave-credit-transactions', [LeaveCreditTransactionController::class, 'index']);
 Route::get('leave-credit-balances', [LeaveCreditTransactionController::class, 'balances']);
 Route::post('leave-credit-transactions/adjust', [LeaveCreditTransactionController::class, 'adjust']);
+
+// Loan-types API
+Route::get('/loan-types', [LoanTypesController::class, 'index']);
+Route::post('/loan-types', [LoanTypesController::class, 'store']);
+Route::get('/loan-types/{loanType}/edit', [LoanTypesController::class, 'edit']);
+Route::match(['put', 'patch'], '/loan-types/{loanType}', [LoanTypesController::class, 'update']);
+Route::delete('/loan-types/{loanType}', [LoanTypesController::class, 'destroy']);
+
+// Employee Loan API
+Route::get('/employee-loans', [EmployeeLoanController::class, 'index']);
+Route::post('/employee-loans', [EmployeeLoanController::class, 'store']);
+Route::get('/employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'show']);
+Route::put('/employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'update']);
+Route::get('/employee-loan-transactions', [EmployeeLoanTransactionController::class, 'index']);
+Route::get('/employee-loans/{employeeLoan}/transactions', [EmployeeLoanTransactionController::class, 'history']);
+
+// Employee Salary Rates
+
+Route::get('/employee-salary-rates/filter-options', [EmployeeSalaryRateController::class, 'filterOptions']);
+Route::get('/employee-salary-rates', [EmployeeSalaryRateController::class, 'index']);
+Route::get('/employee-salary-rates/{salarySetup}', [EmployeeSalaryRateController::class, 'show']);
+
+// ============================================
+// SALARY ADJUSTMENTS
+// ============================================
+
+Route::middleware('can:manage-salary-adjustments')
+    ->group(function () {
+
+        Route::get('salary-adjustments', [
+            SalaryAdjustmentController::class,
+            'index',
+        ]);
+
+        Route::post('salary-adjustments', [
+            SalaryAdjustmentController::class,
+            'store',
+        ]);
+
+        Route::patch('salary-adjustments/{salaryAdjustment}/approve', [
+            SalaryAdjustmentController::class,
+            'approve',
+        ]);
+
+        Route::patch('salary-adjustments/{salaryAdjustment}/reject', [
+            SalaryAdjustmentController::class,
+            'reject',
+        ]);
+
+        Route::patch('salary-adjustments/{salaryAdjustment}/apply', [
+            SalaryAdjustmentController::class,
+            'apply',
+        ]);
+
+        Route::get('salary-adjustments/{salaryAdjustment}', [
+            SalaryAdjustmentController::class,
+            'show',
+        ]);
+    });
 
 // ============================================
 // TIME LOGS

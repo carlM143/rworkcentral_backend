@@ -3,10 +3,14 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Employee;
 use App\Models\UndertimeRequest;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class UndertimeController extends Controller
@@ -14,17 +18,11 @@ class UndertimeController extends Controller
     public function index(): JsonResponse
     {
         $requests = UndertimeRequest::query()
-            ->with([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog:id,employee_id,work_date,time_in,time_out,undertime_minutes,status',
-                'approver:id,name,email',
-            ])
+            ->with($this->responseRelations())
             ->latest('id')
             ->get();
+
+        $requests->each(fn (UndertimeRequest $undertimeRequest) => $this->appendCurrentPosition($undertimeRequest));
 
         return response()->json([
             'success' => true,
@@ -64,15 +62,9 @@ class UndertimeController extends Controller
                 'approved_at' => now(),
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -101,15 +93,9 @@ class UndertimeController extends Controller
                 'approved_at' => now(),
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -130,25 +116,20 @@ class UndertimeController extends Controller
             'image' => 'nullable',
         ]);
 
-        $start = \Carbon\Carbon::parse($validated['scheduled_time_out']);
-        $end = \Carbon\Carbon::parse($validated['requested_time_out']);
+        $start = Carbon::parse($validated['scheduled_time_out']);
+        $end = Carbon::parse($validated['requested_time_out']);
         $minutes = max(0, (int) $start->diffInMinutes($end, false));
 
-        $employee = \App\Models\Employee::findOrFail($validated['employee_id']);
-        $scheduleId = $employee->employments()->latest('id')->first()?->work_schedule_id
-            ?? \App\Models\WorkSchedule::first()?->id;
+        $employee = Employee::findOrFail($validated['employee_id']);
+        $scheduleId = $employee->employments()->latest('id')->first()?->work_schedule_id;
 
-        if (!$scheduleId) {
-            $fallback = \App\Models\WorkSchedule::create([
-                'schedule_code' => 'STD-DEF',
-                'schedule_name' => 'Standard Regular Schedule',
-                'time_in' => '09:00:00',
-                'time_out' => '18:00:00',
+        if (! $scheduleId) {
+            throw ValidationException::withMessages([
+                'employee_id' => 'The selected employee does not have an assigned work schedule.',
             ]);
-            $scheduleId = $fallback->id;
         }
 
-        $requestNo = 'UT-' . date('Ymd') . '-' . strtoupper(\Illuminate\Support\Str::random(6));
+        $requestNo = 'UT-'.date('Ymd').'-'.strtoupper(Str::random(6));
         $filePath = $this->handleFileUpload($request, $validated['employee_id']);
 
         $undertimeRequest = UndertimeRequest::create([
@@ -165,6 +146,10 @@ class UndertimeController extends Controller
             'approved_by' => $request->user()->id,
             'approved_at' => now(),
         ]);
+
+        $undertimeRequest = $this->appendCurrentPosition(
+            $undertimeRequest->fresh($this->responseRelations())
+        );
 
         return response()->json([
             'success' => true,
@@ -196,9 +181,10 @@ class UndertimeController extends Controller
                 $binary = base64_decode($imageData, true);
 
                 if ($binary !== false) {
-                    $fileName = 'req_' . time() . '_' . \Illuminate\Support\Str::random(10) . '.' . $extension;
+                    $fileName = 'req_'.time().'_'.Str::random(10).'.'.$extension;
                     $path = "requests/{$employeeId}/{$fileName}";
-                    \Illuminate\Support\Facades\Storage::disk('public')->put($path, $binary);
+                    Storage::disk('public')->put($path, $binary);
+
                     return $path;
                 }
             }
@@ -209,7 +195,7 @@ class UndertimeController extends Controller
 
     public function revert(Request $request, UndertimeRequest $undertimeRequest): JsonResponse
     {
-        $reverted = DB::transaction(function () use ($request, $undertimeRequest): UndertimeRequest {
+        $reverted = DB::transaction(function () use ($undertimeRequest): UndertimeRequest {
             $record = UndertimeRequest::query()
                 ->lockForUpdate()
                 ->findOrFail($undertimeRequest->id);
@@ -220,15 +206,9 @@ class UndertimeController extends Controller
                 'approved_at' => null,
             ]);
 
-            return $record->fresh([
-                'employee:id,emp_id,firstname,middlename,lastname,department_id',
-                'employee.department:id,department_name',
-                'employee.employments.department:id,department_name',
-                'employee.employments.position:id,position',
-                'workSchedule:id,schedule_code,schedule_name,time_in,time_out',
-                'timeLog',
-                'approver:id,name,email',
-            ]);
+            return $this->appendCurrentPosition(
+                $record->fresh($this->responseRelations())
+            );
         });
 
         return response()->json([
@@ -236,5 +216,41 @@ class UndertimeController extends Controller
             'message' => 'Undertime request reverted to pending successfully.',
             'data' => $reverted,
         ]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function responseRelations(): array
+    {
+        return [
+            'employee:id,emp_id,firstname,middlename,lastname,department_id',
+            'employee.department:id,department_name',
+            'employee.employments.department:id,department_name',
+            'employee.employments.position:id,position',
+            'employee.latestEmployment',
+            'employee.latestEmployment.position:id,position',
+            'workSchedule:id,schedule_code,schedule_name,required_work_hours,grace_period,break_start,break_end,status',
+            'workSchedule.days:id,work_schedule_id,day_of_week,is_working_day,time_in,time_out',
+            'timeLog:id,employee_id,work_date,time_in,time_out,undertime_minutes,status',
+            'approver:id,name,email',
+        ];
+    }
+
+    private function appendCurrentPosition(UndertimeRequest $undertimeRequest): UndertimeRequest
+    {
+        $employee = $undertimeRequest->employee;
+        $position = $employee?->latestEmployment?->position;
+
+        if ($employee) {
+            $employee->setAttribute('position_id', $position?->id);
+            $employee->setAttribute('position', $position?->position);
+            $employee->setAttribute('position_details', $position ? [
+                'id' => $position->id,
+                'position' => $position->position,
+            ] : null);
+        }
+
+        return $undertimeRequest;
     }
 }

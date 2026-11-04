@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Employee extends Model
 {
@@ -121,5 +122,9 @@ class Employee extends Model
     {
         return $this->hasOne(Employment::class)
             ->latestOfMany();
+    }
+    public function salaryAdjustments(): HasMany
+    {
+        return $this->hasMany(SalaryAdjustment::class);
     }
 }
