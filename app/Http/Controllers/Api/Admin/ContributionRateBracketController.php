@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ContributionRateBracket;
+use App\Models\ContributionRateSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class ContributionRateBracketController extends Controller
 {
@@ -29,6 +31,43 @@ class ContributionRateBracketController extends Controller
         ];
     }
 
+    /**
+     * Ensure the bracket belongs to a bracket-based schedule and that its salary
+     * range does not overlap another bracket of the same schedule.
+     */
+    private function guardBracket(array $validated, ?int $ignoreId = null): void
+    {
+        $schedule = ContributionRateSchedule::find($validated['contribution_rate_schedule_id']);
+
+        if ($schedule && $schedule->calculation_method !== 'bracket') {
+            throw ValidationException::withMessages([
+                'contribution_rate_schedule_id' => 'Brackets can only be added to a bracket-based rate schedule.',
+            ]);
+        }
+
+        $from = (float) $validated['salary_from'];
+        $to = isset($validated['salary_to']) ? (float) $validated['salary_to'] : null;
+
+        $overlap = ContributionRateBracket::query()
+            ->where('contribution_rate_schedule_id', $validated['contribution_rate_schedule_id'])
+            ->when($ignoreId, fn ($query) => $query->whereKeyNot($ignoreId))
+            ->where(function ($query) use ($to) {
+                if ($to !== null) {
+                    $query->where('salary_from', '<=', $to);
+                }
+            })
+            ->where(function ($query) use ($from) {
+                $query->whereNull('salary_to')->orWhere('salary_to', '>=', $from);
+            })
+            ->exists();
+
+        if ($overlap) {
+            throw ValidationException::withMessages([
+                'salary_from' => 'This salary range overlaps an existing bracket in the same schedule.',
+            ]);
+        }
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = ContributionRateBracket::query()->with(self::RELATIONS);
@@ -47,6 +86,7 @@ class ContributionRateBracketController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $this->guardBracket($validated);
 
         $bracket = ContributionRateBracket::create($validated);
 
@@ -69,6 +109,7 @@ class ContributionRateBracketController extends Controller
     public function update(Request $request, ContributionRateBracket $contributionRateBracket): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $this->guardBracket($validated, $contributionRateBracket->id);
 
         $contributionRateBracket->update($validated);
 

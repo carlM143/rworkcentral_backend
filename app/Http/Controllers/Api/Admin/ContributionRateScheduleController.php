@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ContributionRateSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class ContributionRateScheduleController extends Controller
@@ -16,18 +17,38 @@ class ContributionRateScheduleController extends Controller
     private const RELATIONS = 'contributionType:id,contribution_code,contribution_name,provider,is_status';
 
     /**
+     * Allowed deduction frequencies for fixed contributions.
+     */
+    public const FREQUENCIES = ['monthly', 'semi_monthly', 'weekly', 'per_payroll'];
+
+    /**
      * Validation rules shared by store and update.
+     *
+     * - percentage: salary basis + employee/employer rate (%) + optional salary floor/ceiling
+     * - fixed:      employee/employer amount (₱) + frequency
+     * - bracket:    salary basis + optional salary floor/ceiling (rates live in the brackets table)
      */
     private function rules(): array
     {
         return [
             'contribution_type_id' => ['required', 'integer', 'exists:contribution_types,id'],
             'calculation_method' => ['required', Rule::in(['percentage', 'bracket', 'fixed'])],
-            'salary_basis' => ['required', 'string', 'max:255'],
-            'employee_rate' => ['nullable', 'numeric', 'min:0'],
-            'employer_rate' => ['nullable', 'numeric', 'min:0'],
+            'salary_basis' => ['required_unless:calculation_method,fixed', 'nullable', 'string', 'max:255'],
+            'employee_rate' => ['required_if:calculation_method,percentage', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'employer_rate' => ['required_if:calculation_method,percentage', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'employee_amount' => ['required_if:calculation_method,fixed', 'nullable', 'numeric', 'min:0'],
+            'employer_amount' => ['required_if:calculation_method,fixed', 'nullable', 'numeric', 'min:0'],
+            'frequency' => ['required_if:calculation_method,fixed', 'nullable', Rule::in(self::FREQUENCIES)],
             'minimum_salary_base' => ['nullable', 'numeric', 'min:0'],
-            'maximum_salary_base' => ['nullable', 'numeric', 'min:0'],
+            'maximum_salary_base' => [
+                'nullable', 'numeric', 'min:0',
+                function (string $attribute, mixed $value, \Closure $fail) {
+                    $minimum = request()->input('minimum_salary_base');
+                    if ($value !== null && $minimum !== null && $minimum !== '' && (float) $value < (float) $minimum) {
+                        $fail('The maximum salary must be greater than or equal to the minimum salary.');
+                    }
+                },
+            ],
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
             'is_status' => ['nullable', 'boolean'],
@@ -41,9 +62,26 @@ class ContributionRateScheduleController extends Controller
     {
         $method = $validated['calculation_method'] ?? null;
 
+        if ($method === 'percentage') {
+            $validated['employee_amount'] = null;
+            $validated['employer_amount'] = null;
+            $validated['frequency'] = null;
+        }
+
+        if ($method === 'fixed') {
+            $validated['salary_basis'] = null;
+            $validated['employee_rate'] = null;
+            $validated['employer_rate'] = null;
+            $validated['minimum_salary_base'] = null;
+            $validated['maximum_salary_base'] = null;
+        }
+
         if ($method === 'bracket') {
             $validated['employee_rate'] = null;
             $validated['employer_rate'] = null;
+            $validated['employee_amount'] = null;
+            $validated['employer_amount'] = null;
+            $validated['frequency'] = null;
         }
 
         return $validated;
@@ -51,10 +89,16 @@ class ContributionRateScheduleController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = ContributionRateSchedule::query()->with(self::RELATIONS);
+        $query = ContributionRateSchedule::query()
+            ->with(self::RELATIONS)
+            ->withCount('brackets');
 
         if ($request->filled('contribution_type_id')) {
             $query->where('contribution_type_id', $request->integer('contribution_type_id'));
+        }
+
+        if ($request->filled('calculation_method')) {
+            $query->where('calculation_method', $request->string('calculation_method')->toString());
         }
 
         if ($request->filled('status')) {
@@ -112,11 +156,13 @@ class ContributionRateScheduleController extends Controller
 
     public function destroy(ContributionRateSchedule $contributionRateSchedule): JsonResponse
     {
-        if ($contributionRateSchedule->brackets()->exists()
-            || $contributionRateSchedule->payrollContributions()->exists()) {
+        if (
+            $contributionRateSchedule->brackets()->exists() ||
+            $contributionRateSchedule->payrollContributions()->exists()
+        ) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete this rate schedule because it already has rate brackets or payroll contributions.',
+                'message' => 'Cannot delete this contribution rate schedule because it has connected rate brackets or payroll contributions.',
             ], 409);
         }
 

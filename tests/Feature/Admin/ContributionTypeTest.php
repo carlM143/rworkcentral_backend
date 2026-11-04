@@ -113,12 +113,12 @@ class ContributionTypeTest extends TestCase
         $this->assertDatabaseMissing('contribution_types', ['id' => $type->id]);
     }
 
-    public function test_contribution_type_in_use_cannot_be_deleted(): void
+    public function test_contribution_type_in_use_cascades_delete(): void
     {
         $this->actingAsAdmin();
         $type = $this->makeContributionType();
 
-        ContributionRateSchedule::create([
+        $schedule = ContributionRateSchedule::create([
             'contribution_type_id' => $type->id,
             'calculation_method' => 'percentage',
             'salary_basis' => 'monthly_basic_salary',
@@ -129,9 +129,10 @@ class ContributionTypeTest extends TestCase
         ]);
 
         $this->deleteJson("/api/admin/contribution-types/{$type->id}")
-            ->assertStatus(409)
-            ->assertJsonPath('success', false);
+            ->assertOk()
+            ->assertJsonPath('success', true);
 
-        $this->assertDatabaseHas('contribution_types', ['id' => $type->id]);
+        $this->assertDatabaseMissing('contribution_types', ['id' => $type->id]);
+        $this->assertDatabaseMissing('contribution_rate_schedules', ['id' => $schedule->id]);
     }
 }

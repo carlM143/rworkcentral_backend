@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ContributionRateBracket;
 use App\Models\ContributionType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class ContributionTypeController extends Controller
@@ -99,18 +101,20 @@ class ContributionTypeController extends Controller
 
     public function destroy(ContributionType $contributionType): JsonResponse
     {
-        $inUse = $contributionType->rateSchedules()->exists()
-            || $contributionType->deductionSettings()->exists()
-            || $contributionType->payrollContributions()->exists();
+        DB::transaction(function () use ($contributionType) {
+            $scheduleIds = $contributionType->rateSchedules()->pluck('id');
 
-        if ($inUse) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot delete this contribution type because it is already used by rate schedules, deduction settings, or payroll contributions.',
-            ], 409);
-        }
+            if ($scheduleIds->isNotEmpty()) {
+                ContributionRateBracket::query()
+                    ->whereIn('contribution_rate_schedule_id', $scheduleIds)
+                    ->delete();
+            }
 
-        $contributionType->delete();
+            $contributionType->payrollContributions()->delete();
+            $contributionType->deductionSettings()->delete();
+            $contributionType->rateSchedules()->delete();
+            $contributionType->delete();
+        });
 
         return response()->json([
             'success' => true,

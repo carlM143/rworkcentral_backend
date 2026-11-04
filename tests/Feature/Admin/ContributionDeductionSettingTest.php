@@ -88,6 +88,14 @@ class ContributionDeductionSettingTest extends TestCase
         ]))->assertStatus(422)->assertJsonValidationErrors('first_cutoff_percent');
     }
 
+    public function test_cutoff_percentages_must_total_100(): void
+    {
+        $this->postJson('/api/admin/contribution-deduction-settings', $this->payload([
+            'first_cutoff_percent' => 50.00,
+            'second_cutoff_percent' => 25.00,
+        ]))->assertStatus(422)->assertJsonValidationErrors('second_cutoff_percent');
+    }
+
     public function test_authenticated_user_can_update_a_deduction_setting(): void
     {
         $setting = ContributionDeductionSetting::create($this->payload());

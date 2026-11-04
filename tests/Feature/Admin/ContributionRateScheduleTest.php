@@ -117,6 +117,47 @@ class ContributionRateScheduleTest extends TestCase
             ->assertJsonPath('data.is_status', false);
     }
 
+    public function test_fixed_schedule_requires_amounts_and_frequency(): void
+    {
+        $this->postJson('/api/admin/contribution-rate-schedules', $this->payload([
+            'calculation_method' => 'fixed',
+            'salary_basis' => null,
+        ]))->assertStatus(422)->assertJsonValidationErrors(['employee_amount', 'employer_amount', 'frequency']);
+    }
+
+    public function test_fixed_schedule_stores_amounts_and_clears_rates(): void
+    {
+        $this->postJson('/api/admin/contribution-rate-schedules', $this->payload([
+            'calculation_method' => 'fixed',
+            'salary_basis' => null,
+            'employee_amount' => 100,
+            'employer_amount' => 200,
+            'frequency' => 'monthly',
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('data.employee_amount', '100.00')
+            ->assertJsonPath('data.employer_amount', '200.00')
+            ->assertJsonPath('data.frequency', 'monthly')
+            ->assertJsonPath('data.employee_rate', null)
+            ->assertJsonPath('data.minimum_salary_base', null);
+    }
+
+    public function test_percentage_schedule_requires_rates(): void
+    {
+        $this->postJson('/api/admin/contribution-rate-schedules', $this->payload([
+            'employee_rate' => null,
+            'employer_rate' => null,
+        ]))->assertStatus(422)->assertJsonValidationErrors(['employee_rate', 'employer_rate']);
+    }
+
+    public function test_maximum_salary_cannot_be_lower_than_minimum(): void
+    {
+        $this->postJson('/api/admin/contribution-rate-schedules', $this->payload([
+            'minimum_salary_base' => 20000,
+            'maximum_salary_base' => 10000,
+        ]))->assertStatus(422)->assertJsonValidationErrors('maximum_salary_base');
+    }
+
     public function test_rate_schedule_can_be_deleted_when_unused(): void
     {
         $schedule = ContributionRateSchedule::create($this->payload());
@@ -132,7 +173,7 @@ class ContributionRateScheduleTest extends TestCase
     {
         $schedule = ContributionRateSchedule::create($this->payload());
 
-        ContributionRateBracket::create([
+        $bracket = ContributionRateBracket::create([
             'contribution_rate_schedule_id' => $schedule->id,
             'salary_from' => 0,
             'salary_to' => 10000,
@@ -143,5 +184,6 @@ class ContributionRateScheduleTest extends TestCase
             ->assertJsonPath('success', false);
 
         $this->assertDatabaseHas('contribution_rate_schedules', ['id' => $schedule->id]);
+        $this->assertDatabaseHas('contribution_rate_brackets', ['id' => $bracket->id]);
     }
 }

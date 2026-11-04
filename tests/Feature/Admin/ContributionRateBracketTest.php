@@ -123,6 +123,30 @@ class ContributionRateBracketTest extends TestCase
         ]);
     }
 
+    public function test_bracket_ranges_cannot_overlap_within_a_schedule(): void
+    {
+        ContributionRateBracket::create($this->payload());
+
+        $this->postJson('/api/admin/contribution-rate-brackets', $this->payload([
+            'salary_from' => 9000,
+            'salary_to' => 15000,
+        ]))->assertStatus(422)->assertJsonValidationErrors('salary_from');
+
+        $this->postJson('/api/admin/contribution-rate-brackets', $this->payload([
+            'salary_from' => 10000,
+            'salary_to' => 15000,
+        ]))->assertCreated();
+    }
+
+    public function test_brackets_require_a_bracket_based_schedule(): void
+    {
+        $this->schedule->update(['calculation_method' => 'percentage']);
+
+        $this->postJson('/api/admin/contribution-rate-brackets', $this->payload())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('contribution_rate_schedule_id');
+    }
+
     public function test_authenticated_user_can_delete_a_bracket(): void
     {
         $bracket = ContributionRateBracket::create($this->payload());
