@@ -10,10 +10,13 @@ return new class extends Migration
     {
         Schema::create('holiday_types', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
-            $table->string('holiday_type_name')->unique();
+
+            $table->string('type_code')->unique();
+            $table->string('type_name');
             $table->text('description')->nullable();
+
             $table->boolean('status')->default(true);
+
             $table->timestamps();
         });
     }
