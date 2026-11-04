@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\Admin\TimeLogController;
 use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
 use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
+use App\Http\Controllers\Api\Admin\ManualTimeEntryController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================
@@ -295,5 +296,30 @@ Route::patch(
     [LateAdjustmentController::class, 'reject']
 );
 
+
+// ============================================
+// MANUAL TIME IN / OUT
+// ============================================
+
+
+Route::patch(
+    'manual-time-entries/{timeLog}',
+    [ManualTimeEntryController::class, 'update']
+);
+
+Route::get(
+    'manual-time-entries',
+    [ManualTimeEntryController::class, 'index']
+);
+
+Route::post(
+    'manual-time-entries',
+    [ManualTimeEntryController::class, 'store']
+);
+
+Route::get(
+    'manual-time-entries/{timeLog}',
+    [ManualTimeEntryController::class, 'show']
+);
 
 
