@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Employee;
 use App\Models\TimeLog;
+use App\Services\AttendanceScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
@@ -23,9 +25,13 @@ class TimeLogImportController extends Controller
         'break_in',
     ];
 
-    public function store(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
+    public function store(
+    Request $request,
+    AttendanceScheduleService $scheduleService
+): JsonResponse {
+    $this->authorizeTimekeeping($request, 'import');
+
+    $validated = $request->validate([
             'file' => ['required', 'file', 'max:5120'],
             'replace_existing' => ['nullable', 'boolean'],
         ]);
@@ -60,11 +66,18 @@ class TimeLogImportController extends Controller
                 ], 422);
             }
 
-            $header = array_map(function ($column) {
-                return strtolower(trim(
-                    preg_replace('/^\xEF\xBB\xBF/', '', (string) $column)
-                ));
-            }, $header);
+            $header = array_map(
+                function ($column) {
+                    return strtolower(trim(
+                        preg_replace(
+                            '/^\xEF\xBB\xBF/',
+                            '',
+                            (string) $column
+                        )
+                    ));
+                },
+                $header
+            );
 
             if (
                 count($header) !== count(array_unique($header)) ||
@@ -82,9 +95,14 @@ class TimeLogImportController extends Controller
             $duplicates = 0;
             $invalid = 0;
             $processed = 0;
+
             $errors = [];
             $seen = [];
             $employeeCache = [];
+
+            $hasCorrectionTable = Schema::hasTable(
+                'time_log_correction_requests'
+            );
 
             DB::beginTransaction();
 
@@ -126,24 +144,44 @@ class TimeLogImportController extends Controller
                     );
 
                     $validation = Validator::make($row, [
-                        'emp_id' => ['required', 'string', 'max:100'],
-                        'work_date' => ['required', 'date_format:Y-m-d'],
-                        'time_in' => ['nullable', 'string'],
-                        'time_out' => ['nullable', 'string'],
-                        'break_out' => ['nullable', 'string'],
-                        'break_in' => ['nullable', 'string'],
+                        'emp_id' => [
+                            'required',
+                            'string',
+                            'max:100',
+                        ],
+                        'work_date' => [
+                            'required',
+                            'date_format:Y-m-d',
+                        ],
+                        'time_in' => [
+                            'nullable',
+                            'string',
+                        ],
+                        'time_out' => [
+                            'nullable',
+                            'string',
+                        ],
+                        'break_out' => [
+                            'nullable',
+                            'string',
+                        ],
+                        'break_in' => [
+                            'nullable',
+                            'string',
+                        ],
                     ]);
 
                     if ($validation->fails()) {
                         $invalid++;
+
                         $errors[] = "Row {$line}: " .
                             $validation->errors()->first();
+
                         continue;
                     }
 
                     $employeeNumber = $row['emp_id'];
                     $date = $row['work_date'];
-
                     $key = $employeeNumber . '|' . $date;
 
                     if (isset($seen[$key])) {
@@ -153,24 +191,46 @@ class TimeLogImportController extends Controller
 
                     $seen[$key] = true;
 
-                    if (!array_key_exists($employeeNumber, $employeeCache)) {
-                        $employeeCache[$employeeNumber] = Employee::query()
-                            ->where('emp_id', $employeeNumber)
-                            ->first();
+                    if (!array_key_exists(
+                        $employeeNumber,
+                        $employeeCache
+                    )) {
+                        $employeeCache[$employeeNumber] =
+                            Employee::query()
+                                ->where('emp_id', $employeeNumber)
+                                ->first();
                     }
 
                     $employee = $employeeCache[$employeeNumber];
 
                     if (!$employee) {
                         $invalid++;
-                        $errors[] = "Row {$line}: Employee {$employeeNumber} not found.";
+
+                        $errors[] =
+                            "Row {$line}: Employee {$employeeNumber} not found.";
+
                         continue;
                     }
 
-                    $timeIn = $this->parseDateTime($date, $row['time_in']);
-                    $timeOut = $this->parseDateTime($date, $row['time_out']);
-                    $breakOut = $this->parseDateTime($date, $row['break_out']);
-                    $breakIn = $this->parseDateTime($date, $row['break_in']);
+                    $timeIn = $this->parseDateTime(
+                        $date,
+                        $row['time_in']
+                    );
+
+                    $timeOut = $this->parseDateTime(
+                        $date,
+                        $row['time_out']
+                    );
+
+                    $breakOut = $this->parseDateTime(
+                        $date,
+                        $row['break_out']
+                    );
+
+                    $breakIn = $this->parseDateTime(
+                        $date,
+                        $row['break_in']
+                    );
 
                     if (
                         ($row['time_in'] !== '' && !$timeIn) ||
@@ -188,13 +248,25 @@ class TimeLogImportController extends Controller
                         (!$breakOut && $breakIn)
                     ) {
                         $invalid++;
-                        $errors[] = "Row {$line}: Both break times are required.";
+
+                        $errors[] =
+                            "Row {$line}: Both break times are required.";
+
                         continue;
                     }
 
-                    if ($timeIn && $timeOut && $timeOut->lt($timeIn)) {
+                    // Overnight attendance requires its own
+                    // explicit date-handling policy.
+                    if (
+                        $timeIn &&
+                        $timeOut &&
+                        $timeOut->lt($timeIn)
+                    ) {
                         $invalid++;
-                        $errors[] = "Row {$line}: Time Out precedes Time In.";
+
+                        $errors[] =
+                            "Row {$line}: Time Out precedes Time In.";
+
                         continue;
                     }
 
@@ -207,37 +279,128 @@ class TimeLogImportController extends Controller
                             $breakIn->gt($timeOut)
                         ) {
                             $invalid++;
-                            $errors[] = "Row {$line}: Invalid break interval.";
+
+                            $errors[] =
+                                "Row {$line}: Invalid break interval.";
+
                             continue;
                         }
                     }
 
-                    $late = 0;
+                    // Check existing record before applying changes.
+                    $existing = TimeLog::query()
+                        ->where('employee_id', $employee->id)
+                        ->whereDate('work_date', $date)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($existing && !$replaceExisting) {
+                        $duplicates++;
+                        continue;
+                    }
+
+                    // Protect attendance records that already have
+                    // an approved time log correction.
+                    if ($existing && $hasCorrectionTable) {
+                        $hasApprovedCorrection = DB::table(
+                            'time_log_correction_requests'
+                        )
+                            ->where('time_log_id', $existing->id)
+                            ->whereIn('status', ['pending', 'approved'])
+                            ->exists();
+
+                        if ($hasApprovedCorrection) {
+                            $invalid++;
+
+                            $errors[] =
+                                "Row {$line}: Attendance has an approved correction. Manual review is required.";
+
+                            continue;
+                        }
+                    }
+
+                    // Resolve schedule from the employee's
+                    // employment record, never from a global
+                    // hardcoded shift.
+                    $calculation = $scheduleService->calculateLate(
+                        (int) $employee->id,
+                        $date,
+                        $timeIn?->toDateTimeString()
+                    );
+
+                    if (!$calculation) {
+                        $invalid++;
+
+                        $errors[] =
+                            "Row {$line}: No applicable work schedule found for employee {$employeeNumber} on {$date}.";
+
+                        continue;
+                    }
+
+                    $scheduledIn = Carbon::parse(
+                        $calculation['scheduled_in']
+                    );
+
+                    $scheduledOut = Carbon::parse(
+                        $calculation['scheduled_out']
+                    );
+
+                    // Historical/current workday and rest-day
+                    // rules are not yet fully verified.
+                    // For now, reject dates with an obvious
+                    // overnight schedule rather than calculate
+                    // incorrectly using same-day CSV times.
+                    if (
+                        $scheduledOut->toDateString() !== $date
+                    ) {
+                        $invalid++;
+
+                        $errors[] =
+                            "Row {$line}: Overnight shift requires a dated biometric import format.";
+
+                        continue;
+                    }
+
+                    // Preserve original lateness.
+                    $rawLate = (int) (
+                        $calculation['raw_late_minutes'] ?? 0
+                    );
+
+                    $graceMinutes = (int) (
+                        $calculation['grace_period_minutes'] ?? 0
+                    );
+
+                    $chargeableLate = (int) (
+                        $calculation['chargeable_late_minutes'] ?? 0
+                    );
+
                     $undertime = 0;
                     $worked = 0;
 
-                    // Temporary day schedule for demo records.
-                    // Replace with assigned work schedule later.
-                    $scheduledIn = Carbon::parse("$date 08:00:00");
-                    $scheduledOut = Carbon::parse("$date 17:00:00");
-
-                    if ($timeIn && $timeIn->gt($scheduledIn)) {
-                        $late = (int) $scheduledIn
-                            ->diffInMinutes($timeIn, true);
-                    }
-
-                    if ($timeOut && $timeOut->lt($scheduledOut)) {
-                        $undertime = (int) $timeOut
-                            ->diffInMinutes($scheduledOut, true);
+                    if (
+                        $timeOut &&
+                        $timeOut->lt($scheduledOut)
+                    ) {
+                        $undertime = (int) floor(
+                            $timeOut->diffInSeconds(
+                                $scheduledOut
+                            ) / 60
+                        );
                     }
 
                     if ($timeIn && $timeOut) {
-                        $worked = (int) $timeIn
-                            ->diffInMinutes($timeOut, true);
+                        $worked = (int) floor(
+                            $timeIn->diffInSeconds(
+                                $timeOut
+                            ) / 60
+                        );
 
                         if ($breakOut && $breakIn) {
-                            $worked -= (int) $breakOut
-                                ->diffInMinutes($breakIn, true);
+                            $worked -= (int) floor(
+                                $breakOut->diffInSeconds(
+                                    $breakIn
+                                ) / 60
+                            );
                         }
 
                         $worked = max(0, $worked);
@@ -247,7 +410,7 @@ class TimeLogImportController extends Controller
                         $status = 'Missing';
                     } elseif (!$timeIn || !$timeOut) {
                         $status = 'Incomplete';
-                    } elseif ($late > 0) {
+                    } elseif ($chargeableLate > 0) {
                         $status = 'Late';
                     } elseif ($undertime > 0) {
                         $status = 'Undertime';
@@ -255,28 +418,36 @@ class TimeLogImportController extends Controller
                         $status = 'Complete';
                     }
 
-                    $existing = TimeLog::query()
-                        ->where('employee_id', $employee->id)
-                        ->whereDate('work_date', $date)
-                        ->first();
-
-                    if ($existing && !$replaceExisting) {
-                        $duplicates++;
-                        continue;
-                    }
-
                     $values = [
+                        'work_schedule_id' =>
+                            $calculation['work_schedule_id'],
+
+                        'scheduled_time_in' =>
+                            $scheduledIn->toDateTimeString(),
+
+                        'scheduled_time_out' =>
+                            $scheduledOut->toDateTimeString(),
+
                         'time_in' => $timeIn,
                         'time_out' => $timeOut,
                         'break_out' => $breakOut,
                         'break_in' => $breakIn,
-                        'late_minutes' => $late,
+
+                        // Legacy raw late value is preserved.
+                        'late_minutes' => $rawLate,
+
+                        'raw_late_minutes' => $rawLate,
+                        'grace_period_minutes' => $graceMinutes,
+                        'chargeable_late_minutes' => $chargeableLate,
+
                         'undertime_minutes' => $undertime,
                         'worked_minutes' => $worked,
                         'overtime_minutes' => 0,
+
                         'source' => 'biometric_import',
                         'status' => $status,
-                        'remarks' => 'Imported from biometric attendance CSV.',
+                        'remarks' =>
+                            'Imported from biometric attendance CSV.',
                     ];
 
                     if ($existing) {
@@ -303,7 +474,9 @@ class TimeLogImportController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Attendance CSV processed successfully.',
+                'message' =>
+                    'Attendance CSV processed successfully.',
+
                 'data' => [
                     'imported' => $imported,
                     'updated' => $updated,
@@ -318,7 +491,8 @@ class TimeLogImportController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Unable to process CSV. Check the file format and try again.',
+                'message' =>
+                    'Unable to process CSV. Check the file format and try again.',
             ], 422);
         } finally {
             fclose($handle);
@@ -356,10 +530,29 @@ class TimeLogImportController extends Controller
                     return $value;
                 }
             } catch (Throwable) {
-                // Try another supported format.
+                // Try the next supported format.
             }
         }
 
         return null;
+    }
+
+    private function authorizeTimekeeping(
+        Request $request,
+        string $privilege
+    ): void {
+        $user = $request->user();
+
+        abort_unless(
+            $user
+            && in_array(
+                $user->role?->name,
+                ['Administrator', 'Human Resources'],
+                true
+            )
+            && $user->hasPrivilege('timekeeping', $privilege),
+            403,
+            'You are not authorized to perform this timekeeping action.'
+        );
     }
 }

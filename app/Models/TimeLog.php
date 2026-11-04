@@ -17,6 +17,12 @@ class TimeLog extends Model
         'undertime_minutes',
         'worked_minutes',
         'overtime_minutes',
+        'work_schedule_id',
+        'scheduled_time_in',
+        'scheduled_time_out',
+        'raw_late_minutes',
+        'grace_period_minutes',
+        'chargeable_late_minutes',
         'source',
         'remarks',
         'status',
@@ -34,6 +40,11 @@ class TimeLog extends Model
             'undertime_minutes' => 'integer',
             'worked_minutes' => 'integer',
             'overtime_minutes' => 'integer',
+            'scheduled_time_in' => 'datetime',
+            'scheduled_time_out' => 'datetime',
+            'raw_late_minutes' => 'integer',
+            'grace_period_minutes' => 'integer',
+            'chargeable_late_minutes' => 'integer',
         ];
     }
 
@@ -50,5 +61,16 @@ class TimeLog extends Model
     public function undertimeRequests()
     {
         return $this->hasMany(UndertimeRequest::class);
+    }
+
+    public function lateAdjustments()
+    {
+        return $this->hasMany(LateAdjustment::class);
+    }
+
+    public function latestLateAdjustment()
+    {
+        return $this->hasOne(LateAdjustment::class)
+            ->latestOfMany();
     }
 }
