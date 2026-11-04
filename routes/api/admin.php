@@ -251,27 +251,42 @@ Route::post(
 // LATE ADJUSTMENTS
 // ============================================
 
-Route::get('late-adjustments', [
-    LateAdjustmentController::class,
-    'index',
-]);
 
-Route::post('late-adjustments', [
-    LateAdjustmentController::class,
-    'store',
-]);
+Route::get(
+    'late-adjustments/eligible-logs',
+    [LateAdjustmentController::class, 'eligibleLogs']
+);
 
-Route::get('late-adjustments/{lateAdjustment}', [
-    LateAdjustmentController::class,
-    'show',
-]);
+Route::get(
+    'late-adjustments',
+    [LateAdjustmentController::class, 'index']
+);
 
-Route::patch('late-adjustments/{lateAdjustment}/approve', [
-    LateAdjustmentController::class,
-    'approve',
-]);
+Route::post(
+    'late-adjustments',
+    [LateAdjustmentController::class, 'store']
+);
 
-Route::patch('late-adjustments/{lateAdjustment}/reject', [
-    LateAdjustmentController::class,
-    'reject',
-]);
+Route::get(
+    'late-adjustments/{lateAdjustment}',
+    [LateAdjustmentController::class, 'show']
+);
+
+Route::match(
+    ['put', 'patch'],
+    'late-adjustments/{lateAdjustment}',
+    [LateAdjustmentController::class, 'update']
+);
+
+Route::patch(
+    'late-adjustments/{lateAdjustment}/approve',
+    [LateAdjustmentController::class, 'approve']
+);
+
+Route::patch(
+    'late-adjustments/{lateAdjustment}/reject',
+    [LateAdjustmentController::class, 'reject']
+);
+
+
+

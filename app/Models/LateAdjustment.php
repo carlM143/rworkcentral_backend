@@ -13,13 +13,24 @@ class LateAdjustment extends Model
         'requested_by',
         'reviewed_by',
 
+        'adjustment_type',
+
+        'original_time_in',
+        'original_time_out',
+        'requested_time_in',
+        'requested_time_out',
+
+        'original_minutes',
+        'requested_minutes',
+        'approved_minutes',
+
         'raw_late_minutes',
         'grace_period_minutes',
         'chargeable_late_minutes',
-
         'requested_waiver_minutes',
         'approved_waiver_minutes',
         'final_late_minutes',
+        'final_undertime_minutes',
 
         'status',
         'reason',
@@ -30,12 +41,23 @@ class LateAdjustment extends Model
     protected function casts(): array
     {
         return [
+            'original_time_in' => 'datetime',
+            'original_time_out' => 'datetime',
+            'requested_time_in' => 'datetime',
+            'requested_time_out' => 'datetime',
+
+            'original_minutes' => 'integer',
+            'requested_minutes' => 'integer',
+            'approved_minutes' => 'integer',
+
             'raw_late_minutes' => 'integer',
             'grace_period_minutes' => 'integer',
             'chargeable_late_minutes' => 'integer',
             'requested_waiver_minutes' => 'integer',
             'approved_waiver_minutes' => 'integer',
             'final_late_minutes' => 'integer',
+            'final_undertime_minutes' => 'integer',
+
             'reviewed_at' => 'datetime',
         ];
     }
@@ -52,17 +74,11 @@ class LateAdjustment extends Model
 
     public function requester(): BelongsTo
     {
-        return $this->belongsTo(
-            User::class,
-            'requested_by'
-        );
+        return $this->belongsTo(User::class, 'requested_by');
     }
 
     public function reviewer(): BelongsTo
     {
-        return $this->belongsTo(
-            User::class,
-            'reviewed_by'
-        );
+        return $this->belongsTo(User::class, 'reviewed_by');
     }
 }
