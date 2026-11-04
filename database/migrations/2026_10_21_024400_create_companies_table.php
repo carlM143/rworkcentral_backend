@@ -13,7 +13,6 @@ return new class extends Migration
 
             $table->foreignId('admin_id')->constrained('users')->restrictOnDelete();
             $table->string('company_name');
-            $table->string('location');
             $table->boolean('status')->default(true);
 
             $table->timestamps();

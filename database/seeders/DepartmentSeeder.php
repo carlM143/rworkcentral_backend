@@ -18,10 +18,8 @@ class DepartmentSeeder extends Seeder
         $admin = User::where('email', 'hr@rworkcentral.test')->firstOrFail();
 
         $departments = [
-            ['name' => 'Human Resources', 'code' => 'HR'],
-            ['name' => 'Information Technology', 'code' => 'IT'],
-            ['name' => 'Finance and Accounting', 'code' => 'FIN'],
-            ['name' => 'Operations', 'code' => 'OPS'],
+            ['name' => 'R Web Solutions', 'code' => 'RWS'],
+            ['name' => 'Technicians', 'code' => 'TECH'],
         ];
 
         foreach ($departments as $department) {

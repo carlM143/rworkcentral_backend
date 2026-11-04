@@ -41,7 +41,6 @@ class UpdateEmployeeRequest extends FormRequest
             'employment.department_id' => ['sometimes', 'required', 'integer', Rule::exists('departments', 'id')],
             'employment.position_id' => ['sometimes', 'required', 'integer', Rule::exists('positions', 'id')],
             'employment.work_schedule_id' => ['nullable', 'integer', Rule::exists('work_schedules', 'id')],
-            'employment.restday_id' => ['nullable', 'integer', Rule::exists('rest_days', 'id')],
             'employment.date_hired' => ['sometimes', 'required', 'date'],
 
             // Salary Setup - Optional

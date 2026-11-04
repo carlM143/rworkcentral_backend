@@ -15,11 +15,11 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             UserSeeder::class,
             CompanySeeder::class,
+            ContributionTypeSeeder::class,
             DepartmentSeeder::class,
             PositionSeeder::class,
 
             ScheduleTypeSeeder::class,
-            RestDaySeeder::class,
 
             EmploymentTypeSeeder::class,
             EmploymentDocumentSeeder::class,

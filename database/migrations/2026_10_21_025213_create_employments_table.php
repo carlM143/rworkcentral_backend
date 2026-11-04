@@ -15,7 +15,6 @@ return new class extends Migration
             $table->foreignId('department_id')->constrained('departments')->restrictOnDelete();
             $table->foreignId('position_id')->constrained('positions')->restrictOnDelete();
             $table->foreignId('work_schedule_id')->nullable()->constrained('work_schedules')->restrictOnDelete();
-            $table->foreignId('restday_id')->nullable()->constrained('rest_days')->restrictOnDelete();
             $table->date('date_hired');
             $table->string('mobile')->nullable();
             $table->string('residential_address')->nullable();

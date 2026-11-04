@@ -14,6 +14,9 @@ class ContributionRateSchedule extends Model
         'salary_basis',
         'employee_rate',
         'employer_rate',
+        'employee_amount',
+        'employer_amount',
+        'frequency',
         'minimum_salary_base',
         'maximum_salary_base',
         'effective_from',
@@ -26,6 +29,8 @@ class ContributionRateSchedule extends Model
         return [
             'employee_rate' => 'decimal:5',
             'employer_rate' => 'decimal:5',
+            'employee_amount' => 'decimal:2',
+            'employer_amount' => 'decimal:2',
             'minimum_salary_base' => 'decimal:2',
             'maximum_salary_base' => 'decimal:2',
             'effective_from' => 'date',

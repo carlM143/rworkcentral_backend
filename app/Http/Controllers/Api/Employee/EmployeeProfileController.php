@@ -24,7 +24,7 @@ class EmployeeProfileController extends Controller
         'employments.department',
         'employments.position',
         'employments.workSchedule.scheduleType',
-        'employments.restday',
+        'employments.workSchedule.days',
         'salarySetup.salaryType',
         'documents.employmentDocument',
     ];
@@ -41,6 +41,41 @@ class EmployeeProfileController extends Controller
         }
 
         $data = $employee->load(self::PROFILE_RELATIONSHIPS)->toArray();
+        $currentEmployment = $employee->employments()
+            ->with(['employmentType', 'department', 'position', 'workSchedule.scheduleType', 'workSchedule.days'])
+            ->orderByDesc('date_hired')
+            ->orderByDesc('id')
+            ->first();
+        $workSchedule = $currentEmployment?->workSchedule;
+        $weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat', 'Sun'];
+        $workingDays = $workSchedule?->days->pluck('day_of_week')->all() ?? [];
+        $currentEmploymentData = $currentEmployment?->toArray();
+
+        if ($currentEmploymentData) {
+            unset($currentEmploymentData['restday_id']);
+        }
+
+        $data['employments'] = collect($data['employments'] ?? [])
+            ->map(function (array $employment): array {
+                unset($employment['restday_id']);
+
+                return $employment;
+            })
+            ->all();
+
+        $data['current_employment'] = $currentEmploymentData;
+        $data['work_schedule'] = $workSchedule?->toArray();
+        $data['rest_days'] = $workSchedule
+            ? collect($weekdays)
+                ->reject(fn (string $day): bool => in_array($day, $workingDays, true))
+                ->map(fn (string $day): array => [
+                    'day_of_week' => $day,
+                    'is_working_day' => false,
+                    'source' => 'missing_work_schedule_day',
+                ])
+                ->values()
+                ->all()
+            : [];
 
         $photoDataUrl = null;
         if ($employee->profile_photo && Storage::disk('local')->exists($employee->profile_photo)) {

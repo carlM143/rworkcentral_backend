@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreEmployeeRequest;
 use App\Http\Requests\Admin\UpdateEmployeeRequest;
 use App\Models\Employee;
+use App\Models\Department;
+use App\Models\Position;
+use App\Models\EmploymentType;
 use App\Services\EmployeeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +23,7 @@ class EmployeeController extends Controller
         'employments.department',
         'employments.position',
         'employments.workSchedule.scheduleType',
-        'employments.restday',
+        'employments.workSchedule.days',
     ];
 
     private const DETAIL_RELATIONSHIPS = [
@@ -31,7 +34,7 @@ class EmployeeController extends Controller
         'employments.department',
         'employments.position',
         'employments.workSchedule.scheduleType',
-        'employments.restday',
+        'employments.workSchedule.days',
 
         // Government Requirements
         'governmentRequirements',
@@ -146,4 +149,67 @@ class EmployeeController extends Controller
             'data' => $employee->fresh()->load(self::LIST_RELATIONSHIPS),
         ]);
     }
+
+    
+    public function reactivate(Employee $employee): JsonResponse
+    {
+        $employee->update(['status' => true]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employee reactivated successfully.',
+            'data' => $employee->fresh()->load(self::LIST_RELATIONSHIPS),
+        ]);
+    }
+
+    
+    public function filterOptions(): JsonResponse
+    {
+        $departments = Department::query()
+            ->get()
+            ->map(fn ($department) => [
+                'id' => (int) $department->id,
+                'name' => (string) $department->department_name,
+            ])
+            ->filter(fn ($item) => $item['name'] !== '')
+            ->sortBy('name')
+            ->values();
+
+        $positions = Position::query()
+            ->get()
+            ->map(fn ($position) => [
+                'id' => (int) $position->id,
+                'name' => (string) $position->position,
+            ])
+            ->filter(fn ($item) => $item['name'] !== '')
+            ->sortBy('name')
+            ->values();
+
+        $employmentTypes = EmploymentType::query()
+            ->get()
+            ->map(fn ($type) => [
+                'id' => (int) $type->id,
+                'name' => (string) (
+                    $type->type_name
+                    ?? $type->name
+                    ?? $type->employment_type
+                    ?? ''
+                ),
+            ])
+            ->filter(fn ($item) => $item['name'] !== '')
+            ->sortBy('name')
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employee filter options retrieved successfully.',
+            'data' => [
+                'departments' => $departments,
+                'positions' => $positions,
+                'employment_types' => $employmentTypes,
+            ],
+        ]);
+    }
+
+
 }

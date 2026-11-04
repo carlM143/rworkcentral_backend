@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleDay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -23,7 +24,7 @@ class ScheduleController extends Controller
 
             $query->where(function ($q) use ($search) {
                 $q->where('schedule_name', 'like', "%{$search}%")
-                  ->orWhere('schedule_code', 'like', "%{$search}%");
+                    ->orWhere('schedule_code', 'like', "%{$search}%");
             });
         }
 
@@ -60,7 +61,7 @@ class ScheduleController extends Controller
             foreach ($days as $day) {
                 $schedule->days()->create([
                     'day_of_week' => $day['day_of_week'],
-                    'is_working_day' => $day['is_working_day'],
+                    'is_working_day' => true,
                     'time_in' => $day['time_in'],
                     'time_out' => $day['time_out'],
                 ]);
@@ -104,13 +105,20 @@ class ScheduleController extends Controller
         DB::transaction(function () use ($workSchedule, $validated, $days) {
             $workSchedule->update($validated);
 
+            $workingDayNames = array_column($days, 'day_of_week');
+            WorkScheduleDay::query()
+                ->where('work_schedule_id', $workSchedule->id)
+                ->whereNotIn('day_of_week', $workingDayNames)
+                ->delete();
+
             foreach ($days as $day) {
-                $workSchedule->days()->updateOrCreate(
+                WorkScheduleDay::updateOrCreate(
                     [
+                        'work_schedule_id' => $workSchedule->id,
                         'day_of_week' => $day['day_of_week'],
                     ],
                     [
-                        'is_working_day' => $day['is_working_day'],
+                        'is_working_day' => true,
                         'time_in' => $day['time_in'],
                         'time_out' => $day['time_out'],
                     ]
@@ -169,7 +177,7 @@ class ScheduleController extends Controller
             'grace_period' => ['required', 'integer', 'between:0,120'],
             'status' => ['required', 'boolean'],
 
-            'days' => ['required', 'array', 'size:7'],
+            'days' => ['required', 'array', 'min:1', 'max:7'],
 
             'days.*.day_of_week' => [
                 'required',
@@ -183,63 +191,59 @@ class ScheduleController extends Controller
                     'Sun',
                 ]),
             ],
-            'days.*.is_working_day' => ['required', 'boolean'],
+            'days.*.is_working_day' => ['sometimes', 'boolean'],
             'days.*.time_in' => ['nullable', 'date_format:H:i'],
             'days.*.time_out' => ['nullable', 'date_format:H:i'],
         ]);
 
         $days = $validated['days'];
 
-        // Require exactly one record for each day.
+        // A row represents a working day. Missing or unchecked days are rest days.
         $dayNames = array_column($days, 'day_of_week');
 
-        if (count(array_unique($dayNames)) !== 7) {
+        if (count(array_unique($dayNames)) !== count($dayNames)) {
             throw ValidationException::withMessages([
-                'days' => 'Each day from Monday to Sunday must appear exactly once.',
+                'days' => 'Each supplied day may appear only once.',
             ]);
         }
 
-        $workingDays = 0;
+        $workingDays = [];
 
         foreach ($days as $index => $day) {
-            $isWorkingDay = (bool) $day['is_working_day'];
+            $isWorkingDay = (bool) ($day['is_working_day'] ?? true);
             $dayName = $day['day_of_week'];
 
-            if ($isWorkingDay) {
-                $workingDays++;
-
-                if (empty($day['time_in']) || empty($day['time_out'])) {
-                    throw ValidationException::withMessages([
-                        "days.{$index}.time_in" =>
-                            "{$dayName} requires both Time In and Time Out.",
-                    ]);
-                }
-
-                if ($day['time_in'] === $day['time_out']) {
-                    throw ValidationException::withMessages([
-                        "days.{$index}.time_out" =>
-                            "{$dayName} Time Out must be different from Time In.",
-                    ]);
-                }
-
-                $days[$index]['time_in'] = $day['time_in'];
-                $days[$index]['time_out'] = $day['time_out'];
-            } else {
-                // Rest days should not store working times.
-                $days[$index]['time_in'] = null;
-                $days[$index]['time_out'] = null;
+            if (! $isWorkingDay) {
+                continue;
             }
 
-            $days[$index]['is_working_day'] = $isWorkingDay;
+            if (empty($day['time_in']) || empty($day['time_out'])) {
+                throw ValidationException::withMessages([
+                    "days.{$index}.time_in" => "{$dayName} requires both Time In and Time Out.",
+                ]);
+            }
+
+            if ($day['time_in'] === $day['time_out']) {
+                throw ValidationException::withMessages([
+                    "days.{$index}.time_out" => "{$dayName} Time Out must be different from Time In.",
+                ]);
+            }
+
+            $workingDays[] = [
+                'day_of_week' => $dayName,
+                'is_working_day' => true,
+                'time_in' => $day['time_in'],
+                'time_out' => $day['time_out'],
+            ];
         }
 
-        if ($workingDays === 0) {
+        if (empty($workingDays)) {
             throw ValidationException::withMessages([
                 'days' => 'At least one working day must be selected.',
             ]);
         }
 
-        $validated['days'] = $days;
+        $validated['days'] = $workingDays;
 
         return $validated;
     }
