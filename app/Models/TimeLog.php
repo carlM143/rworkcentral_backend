@@ -73,4 +73,12 @@ class TimeLog extends Model
         return $this->hasOne(LateAdjustment::class)
             ->latestOfMany();
     }
+
+    public function correctionRequests()
+    {
+        return $this->hasMany(
+            \App\Models\TimeLogCorrectionRequest::class,
+            'time_log_id'
+        );
+    } 
 }

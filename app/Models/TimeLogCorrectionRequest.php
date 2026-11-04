@@ -17,12 +17,8 @@ class TimeLogCorrectionRequest extends Model
         'status',
         'original_time_in',
         'original_time_out',
-        'original_break_out',
-        'original_break_in',
         'requested_time_in',
         'requested_time_out',
-        'requested_break_out',
-        'requested_break_in',
         'reason',
         'attachment_path',
         'review_remarks',
@@ -34,12 +30,8 @@ class TimeLogCorrectionRequest extends Model
         return [
             'original_time_in' => 'datetime',
             'original_time_out' => 'datetime',
-            'original_break_out' => 'datetime',
-            'original_break_in' => 'datetime',
             'requested_time_in' => 'datetime',
             'requested_time_out' => 'datetime',
-            'requested_break_out' => 'datetime',
-            'requested_break_in' => 'datetime',
             'reviewed_at' => 'datetime',
         ];
     }
