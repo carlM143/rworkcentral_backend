@@ -96,6 +96,13 @@ Route::apiResource('payroll-periods', PayrollPeriodController::class);
 // ============================================
 
 Route::apiResource('leave-types', LeaveTypesController::class);
+Route::get('work-calendar', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'index']);
+Route::post('calendar-events', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'store']);
+Route::put('calendar-events/{event}', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'update']);
+Route::delete('calendar-events/{event}', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'destroy']);
+Route::post('work-calendar', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'store']);
+Route::put('work-calendar/{holiday}', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'update']);
+Route::delete('work-calendar/{holiday}', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'destroy']);
 Route::apiResource('leave-policies', LeavePoliciesController::class);
 
 Route::get('leave-approvals', [LeaveApprovalController::class, 'index']);

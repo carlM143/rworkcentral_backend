@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Employee\EmployeeLeaveCreditController;
+use App\Http\Controllers\Api\Employee\EmployeeCalendarController;
 use App\Http\Controllers\Api\Employee\EmployeeLeaveTypesController;
 use App\Http\Controllers\Api\Employee\EmployeePayslipController;
 use App\Http\Controllers\Api\Employee\EmployeeProfileController;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 
 // Profile & Account Settings
 Route::get('/profile', [EmployeeProfileController::class, 'show']);
+Route::get('/calendar', [EmployeeCalendarController::class, 'index']);
 Route::get('/profile/photo', [EmployeeProfileController::class, 'getPhoto']);
 Route::post('/profile/photo', [EmployeeProfileController::class, 'uploadPhoto']);
 Route::delete('/profile/photo', [EmployeeProfileController::class, 'deletePhoto']);

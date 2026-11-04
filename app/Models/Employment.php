@@ -10,6 +10,7 @@ class Employment extends Model
         'employee_id',
         'employment_type_id',
         'department_id',
+        'location_id',
         'position_id',
         'work_schedule_id',
         'date_hired',
@@ -47,5 +48,10 @@ class Employment extends Model
     public function workSchedule()
     {
         return $this->belongsTo(WorkSchedule::class);
+    }
+
+    public function location()
+    {
+        return $this->belongsTo(Location::class);
     }
 }

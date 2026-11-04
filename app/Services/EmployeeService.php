@@ -70,6 +70,7 @@ class EmployeeService
                     'department_id' => $employment['department_id'],
                     'position_id' => $employment['position_id'],
                     'work_schedule_id' => $employment['work_schedule_id'] ?? null,
+                    'location_id' => $employment['location_id'] ?? null,
                     'date_hired' => $employment['date_hired'],
                     'mobile' => $contact['mobile'] ?? null,
                     'residential_address' => $contact['residential_address'],

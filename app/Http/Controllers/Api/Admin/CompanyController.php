@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Company;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class CompanyController extends Controller
 {
     private const RELATIONS = [
         'admin:id,name,email',
+        'locations',
     ];
 
     private function formatCompany(Company $company): array
@@ -43,7 +45,7 @@ class CompanyController extends Controller
             $search = $request->string('search')->trim()->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('company_name', 'like', "%{$search}%")
-                    ->orWhere('location', 'like', "%{$search}%");
+                    ->orWhereHas('locations', fn ($location) => $location->where('location_name', 'like', "%{$search}%")->orWhere('city', 'like', "%{$search}%"));
             });
         }
 
@@ -81,18 +83,21 @@ class CompanyController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (Company::query()->exists()) {
+            return response()->json(['success' => false, 'message' => 'Only one company is allowed. Add locations to the existing company instead.'], 409);
+        }
         $validated = $request->validate([
             'company_name' => ['required', 'string', 'max:255', 'unique:companies,company_name'],
-            'location' => ['required', 'string', 'max:255'],
+            ...$this->locationRules(),
             'status' => ['nullable', 'boolean'],
         ]);
 
-        $company = Company::create([
-            'admin_id' => $request->user()->id,
-            'company_name' => $validated['company_name'],
-            'location' => $validated['location'],
-            'status' => $validated['status'] ?? true,
-        ]);
+        $company = DB::transaction(function () use ($request, $validated) {
+            $attributes = ['admin_id' => $request->user()->id, 'company_name' => $validated['company_name'], 'status' => $validated['status'] ?? true];
+            $company = Company::create($attributes);
+            $company->locations()->createMany($validated['locations']);
+            return $company;
+        });
 
         return response()->json([
             'success' => true,
@@ -119,15 +124,14 @@ class CompanyController extends Controller
                 'max:255',
                 Rule::unique('companies', 'company_name')->ignore($company->id),
             ],
-            'location' => ['required', 'string', 'max:255'],
+            ...$this->locationRules(false),
             'status' => ['nullable', 'boolean'],
         ]);
 
-        $company->update([
-            'company_name' => $validated['company_name'],
-            'location' => $validated['location'],
-            'status' => $validated['status'] ?? $company->status,
-        ]);
+        DB::transaction(function () use ($company, $validated) {
+            $company->update(['company_name' => $validated['company_name'], 'status' => $validated['status'] ?? $company->status]);
+            $company->locations()->createMany($validated['locations'] ?? []);
+        });
 
         return response()->json([
             'success' => true,
@@ -139,13 +143,14 @@ class CompanyController extends Controller
     public function destroy(Company $company): JsonResponse
     {
         if (
+            $company->locations()->exists() ||
             $company->departments()->exists() ||
             $company->payrollPeriods()->exists() ||
             $company->contributionDeductionSettings()->exists()
         ) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete this company because it has departments, payroll periods, or contribution settings associated with it.',
+                'message' => 'Cannot delete this company because it has locations, departments, payroll periods, or contribution settings associated with it.',
             ], 409);
         }
 
@@ -155,5 +160,15 @@ class CompanyController extends Controller
             'success' => true,
             'message' => 'Company deleted successfully.',
         ]);
+    }
+
+    private function locationRules(bool $required = true): array
+    {
+        return [
+            'locations' => [$required ? 'required' : 'sometimes', 'array', ...($required ? ['min:1'] : [])],
+            'locations.*.location_name' => ['required', 'string', 'max:255', 'distinct', Rule::unique('locations', 'location_name')->where('company_id', request()->route('company')?->id)],
+            'locations.*.city' => ['required', 'string', 'max:255'],
+            'locations.*.province' => ['nullable', 'string', 'max:255'],
+        ];
     }
 }

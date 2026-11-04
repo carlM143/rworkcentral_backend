@@ -8,10 +8,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Company extends Model
 {
+    public function locations(): HasMany
+    {
+        return $this->hasMany(Location::class);
+    }
+
     protected $fillable = [
         'admin_id',
         'company_name',
-        'location',
         'status',
     ];
 

@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 class EmployeeController extends Controller
 {
     private const LIST_RELATIONSHIPS = [
+        'employments.location',
         'department',
         'user.role',
         'contactInformation',
@@ -27,6 +28,7 @@ class EmployeeController extends Controller
     ];
 
     private const DETAIL_RELATIONSHIPS = [
+        'employments.location',
         'department',
         'user.role',
         'contactInformation',

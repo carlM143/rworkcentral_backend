@@ -15,13 +15,16 @@ class CompanySeeder extends Seeder
     {
         $admin = User::where('email', 'admin@rworkcentral.test')->firstOrFail();
 
-        Company::updateOrCreate(
+        $company = Company::updateOrCreate(
             ['company_name' => 'R Work Central'],
             [
                 'admin_id' => $admin->id,
-                'location' => 'Metro Manila, Philippines',
                 'status' => true,
             ],
+        );
+        $company->locations()->firstOrCreate(
+            ['location_name' => 'Metro Manila, Philippines'],
+            ['city' => 'Manila', 'status' => true],
         );
     }
 }
