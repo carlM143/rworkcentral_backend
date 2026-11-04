@@ -12,21 +12,17 @@ class TimeLogCorrectionRequest extends Model
         'employee_id',
         'requested_by',
         'reviewed_by',
+        'applied_by',
         'correction_type',
-        'priority',
         'status',
         'original_time_in',
         'original_time_out',
-        'original_break_out',
-        'original_break_in',
-        'requested_time_in',
-        'requested_time_out',
-        'requested_break_out',
-        'requested_break_in',
+        'requested_time',
         'reason',
         'attachment_path',
         'review_remarks',
         'reviewed_at',
+        'applied_at',
     ];
 
     protected function casts(): array
@@ -34,13 +30,8 @@ class TimeLogCorrectionRequest extends Model
         return [
             'original_time_in' => 'datetime',
             'original_time_out' => 'datetime',
-            'original_break_out' => 'datetime',
-            'original_break_in' => 'datetime',
-            'requested_time_in' => 'datetime',
-            'requested_time_out' => 'datetime',
-            'requested_break_out' => 'datetime',
-            'requested_break_in' => 'datetime',
             'reviewed_at' => 'datetime',
+            'applied_at' => 'datetime',
         ];
     }
 
@@ -62,5 +53,10 @@ class TimeLogCorrectionRequest extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function applier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'applied_by');
     }
 }

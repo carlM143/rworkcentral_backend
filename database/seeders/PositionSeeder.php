@@ -17,33 +17,20 @@ class PositionSeeder extends Seeder
         $company = Company::where('company_name', 'R Work Central')->firstOrFail();
 
         $positions = [
-            'HR' => [
-                ['name' => 'HR Manager', 'description' => 'Manages human resources operations, employee relations, and HR policies.'],
-                ['name' => 'HR Officer', 'description' => 'Handles employee records, recruitment, and HR administration.'],
-                ['name' => 'Recruitment Specialist', 'description' => 'Manages employee recruitment, screening, and hiring processes.'],
-                ['name' => 'HR Assistant', 'description' => 'Provides administrative support for daily HR activities.'],
-            ],
-
-            'IT' => [
-                ['name' => 'IT Manager', 'description' => 'Oversees IT operations, infrastructure, and technology projects.'],
+            'RWS' => [
+                ['name' => 'Web Development Manager', 'description' => 'Leads web development projects and coordinates the development team.'],
                 ['name' => 'Web Developer', 'description' => 'Develops and maintains company websites and web applications.'],
                 ['name' => 'Software Developer', 'description' => 'Designs, develops, and maintains software applications.'],
+                ['name' => 'UI/UX Designer', 'description' => 'Designs user interfaces and improves the experience of web applications.'],
+                ['name' => 'Project Coordinator', 'description' => 'Coordinates project schedules, requirements, and client deliverables.'],
+            ],
+
+            'TECH' => [
+                ['name' => 'Technical Operations Manager', 'description' => 'Oversees technical operations, field assignments, and service quality.'],
+                ['name' => 'Lead Technician', 'description' => 'Leads technicians and handles complex installation and repair work.'],
+                ['name' => 'Field Technician', 'description' => 'Performs on-site installation, maintenance, and troubleshooting.'],
                 ['name' => 'IT Support Specialist', 'description' => 'Provides technical support and maintains computer systems.'],
-                ['name' => 'System Administrator', 'description' => 'Manages servers, networks, and system infrastructure.'],
-            ],
-
-            'FIN' => [
-                ['name' => 'Finance Manager', 'description' => 'Oversees financial operations, budgeting, and financial reporting.'],
-                ['name' => 'Accountant', 'description' => 'Prepares financial statements and maintains accounting records.'],
-                ['name' => 'Payroll Officer', 'description' => 'Processes employee payroll, salary adjustments, and deductions.'],
-                ['name' => 'Accounting Assistant', 'description' => 'Assists in bookkeeping, reconciliation, and financial documentation.'],
-            ],
-
-            'OPS' => [
-                ['name' => 'Operations Manager', 'description' => 'Manages daily operations and ensures efficient business processes.'],
-                ['name' => 'Operations Supervisor', 'description' => 'Supervises operational activities and monitors employee performance.'],
-                ['name' => 'Operations Coordinator', 'description' => 'Coordinates daily work assignments and operational schedules.'],
-                ['name' => 'Administrative Staff', 'description' => 'Supports administrative and operational activities.'],
+                ['name' => 'Junior Technician', 'description' => 'Assists with technical installation, maintenance, and support tasks.'],
             ],
         ];
 

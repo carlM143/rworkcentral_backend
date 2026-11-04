@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\Employee\LeaveRequestController;
 use App\Http\Controllers\Api\Employee\OvertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogController;
 use App\Http\Controllers\Api\Employee\UndertimeRequestController;
+use App\Http\Controllers\Api\Employee\TimeLogCorrectionRequestController;
+
 use Illuminate\Support\Facades\Route;
 
 // Profile & Account Settings
@@ -48,3 +50,11 @@ Route::get('/time-logs/today', [TimeLogController::class, 'today']);
 // Payslips / Payroll
 Route::get('/payslips', [EmployeePayslipController::class, 'index']);
 Route::get('/payslips/{payroll}', [EmployeePayslipController::class, 'show']);
+
+// Time Log Correction Requests
+Route::get('/time-log-correction-requests/time-log', [TimeLogCorrectionRequestController::class, 'timeLogByDate']);
+Route::get('/time-log-correction-requests', [TimeLogCorrectionRequestController::class, 'index']);
+Route::post('/time-log-correction-requests', [TimeLogCorrectionRequestController::class, 'store']);
+Route::get('/time-log-correction-requests/{id}', [TimeLogCorrectionRequestController::class, 'show']);
+Route::match(['put', 'patch'], '/time-log-correction-requests/{id}', [TimeLogCorrectionRequestController::class, 'update']);
+Route::patch('/time-log-correction-requests/{id}/cancel', [TimeLogCorrectionRequestController::class, 'cancel']);

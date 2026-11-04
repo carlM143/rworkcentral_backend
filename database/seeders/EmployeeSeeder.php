@@ -31,7 +31,7 @@ class EmployeeSeeder extends Seeder
                 'status' => true,
 
                 'employment_type' => 'Regular',
-                'department_code' => 'IT',
+                'department_code' => 'RWS',
                 'position' => 'Web Developer',
                 'date_hired' => '2026-10-29',
                 'mobile' => '09171234567',
@@ -56,8 +56,8 @@ class EmployeeSeeder extends Seeder
                 'status' => true,
 
                 'employment_type' => 'Regular',
-                'department_code' => 'HR',
-                'position' => 'HR Officer',
+                'department_code' => 'RWS',
+                'position' => 'Project Coordinator',
                 'date_hired' => '2025-03-10',
                 'mobile' => '09181234567',
                 'residential_address' => 'Ampayon, Butuan City',
@@ -81,8 +81,8 @@ class EmployeeSeeder extends Seeder
                 'status' => true,
 
                 'employment_type' => 'Regular',
-                'department_code' => 'FIN',
-                'position' => 'Accountant',
+                'department_code' => 'TECH',
+                'position' => 'Lead Technician',
                 'date_hired' => '2024-07-15',
                 'mobile' => '09173456789',
                 'residential_address' => 'Libertad, Butuan City',
@@ -106,8 +106,8 @@ class EmployeeSeeder extends Seeder
                 'status' => true,
 
                 'employment_type' => 'Regular',
-                'department_code' => 'OPS',
-                'position' => 'Operations Coordinator',
+                'department_code' => 'TECH',
+                'position' => 'Field Technician',
                 'date_hired' => '2023-11-20',
                 'mobile' => '09175678901',
                 'residential_address' => 'Bancasi, Butuan City',
@@ -177,5 +177,8 @@ class EmployeeSeeder extends Seeder
                 ]
             );
         }
+
+        $this->call(EmployeeTimeLogCorrectionSeeder::class);
+
     }
 }

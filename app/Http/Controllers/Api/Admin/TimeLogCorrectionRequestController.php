@@ -3,45 +3,39 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Employment;
 use App\Models\TimeLog;
 use App\Models\TimeLogCorrectionRequest;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use App\Models\Employment;
+use Throwable;
 
 class TimeLogCorrectionRequestController extends Controller
 {
-    
+    private const TYPES = ['time_in', 'time_out'];
+
     public function index(Request $request): JsonResponse
     {
         $this->authorizeAdminTimekeepingView($request);
-        $data = $request->validate([
+
+        $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
-            'status' => [
-                'nullable',
-                Rule::in(['pending', 'approved', 'rejected']),
-            ],
+            'status' => ['nullable', Rule::in(['pending', 'approved', 'applied', 'rejected', 'cancelled'])],
             'employee_id' => ['nullable', 'integer', 'min:1'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $query = TimeLogCorrectionRequest::query()
-            ->with([
-                'employee',
-                'requester',
-                'reviewer',
-                'timeLog',
-            ])
-            ->latest();
+            ->with(['employee', 'requester', 'reviewer', 'applier', 'timeLog'])
+            ->latest('id');
 
-        // Search employee name or employee number.
-        if (!empty($data['search'])) {
-            $keyword = trim($data['search']);
-
+        if (!empty($filters['search'])) {
+            $keyword = trim($filters['search']);
             $query->whereHas('employee', function ($employeeQuery) use ($keyword) {
                 $employeeQuery->where(function ($q) use ($keyword) {
                     $q->where('firstname', 'like', "%{$keyword}%")
@@ -55,43 +49,27 @@ class TimeLogCorrectionRequestController extends Controller
             });
         }
 
-        // Filter by request status.
-        if (!empty($data['status'])) {
-            $query->where('status', $data['status']);
+        if (!empty($filters['status'])) {
+            $query->where('status', $filters['status']);
         }
 
-        // Optional employee filter.
-        if (!empty($data['employee_id'])) {
-            $query->where('employee_id', $data['employee_id']);
+        if (!empty($filters['employee_id'])) {
+            $query->where('employee_id', $filters['employee_id']);
         }
-
-        // Dynamic statistics across all records.
-        $stats = [
-            'pending' => TimeLogCorrectionRequest::query()
-                ->where('status', 'pending')
-                ->count(),
-
-            'approved' => TimeLogCorrectionRequest::query()
-                ->where('status', 'approved')
-                ->count(),
-
-            'rejected' => TimeLogCorrectionRequest::query()
-                ->where('status', 'rejected')
-                ->count(),
-
-            'this_month' => TimeLogCorrectionRequest::query()
-                ->whereBetween('created_at', [
-                    now()->startOfMonth(),
-                    now()->endOfMonth(),
-                ])
-                ->count(),
-        ];
 
         return response()->json([
             'success' => true,
             'message' => 'Correction requests retrieved successfully.',
             'data' => $query->paginate(15),
-            'stats' => $stats,
+            'stats' => [
+                'pending' => TimeLogCorrectionRequest::where('status', 'pending')->count(),
+                'approved' => TimeLogCorrectionRequest::where('status', 'approved')->count(),
+                'applied' => TimeLogCorrectionRequest::where('status', 'applied')->count(),
+                'rejected' => TimeLogCorrectionRequest::where('status', 'rejected')->count(),
+                'this_month' => TimeLogCorrectionRequest::whereBetween('created_at', [
+                    now()->startOfMonth(), now()->endOfMonth(),
+                ])->count(),
+            ],
         ]);
     }
 
@@ -99,30 +77,24 @@ class TimeLogCorrectionRequestController extends Controller
     {
         $this->authorizeAdminTimekeepingView(request());
 
-        $records = TimeLogCorrectionRequest::query()
-            ->with(['requester', 'reviewer'])
-            ->where('time_log_id', $timeLog->id)
-            ->latest()
-            ->get();
-
         return response()->json([
             'success' => true,
-            'data' => $records,
+            'data' => TimeLogCorrectionRequest::query()
+                ->with(['employee', 'requester', 'reviewer', 'applier', 'timeLog'])
+                ->where('time_log_id', $timeLog->id)
+                ->latest('id')
+                ->get(),
         ]);
     }
 
-    public function show(
-        TimeLogCorrectionRequest $correction
-    ): JsonResponse {
+    public function show(TimeLogCorrectionRequest $correction): JsonResponse
+    {
         $this->authorizeAdminTimekeepingView(request());
 
         return response()->json([
             'success' => true,
             'data' => $correction->load([
-                'employee',
-                'timeLog',
-                'requester',
-                'reviewer',
+                'employee', 'timeLog', 'requester', 'reviewer', 'applier',
             ]),
         ]);
     }
@@ -132,172 +104,116 @@ class TimeLogCorrectionRequestController extends Controller
         $this->authorizeAdminPrivilege($request, 'correction.request');
 
         $data = $request->validate([
-            'time_log_id' => [
-                'required',
-                'integer',
-                'exists:time_logs,id',
-            ],
-            'correction_type' => [
-                'required',
-                Rule::in([
-                    'time_in',
-                    'time_out',
-                    'time_in_out',
-                    'break_times',
-                ]),
-            ],
-            'priority' => [
-                'required',
-                Rule::in(['normal', 'urgent']),
-            ],
-            'requested_time_in' => [
-                'nullable',
-                'date_format:H:i',
-                'required_if:correction_type,time_in,time_in_out',
-            ],
-            'requested_time_out' => [
-                'nullable',
-                'date_format:H:i',
-                'required_if:correction_type,time_out,time_in_out',
-            ],
-            'requested_break_out' => [
-                'nullable',
-                'date_format:H:i',
-                'required_if:correction_type,break_times',
-            ],
-            'requested_break_in' => [
-                'nullable',
-                'date_format:H:i',
-                'required_if:correction_type,break_times',
-            ],
-            'reason' => ['required', 'string', 'min:10', 'max:2000'],
-            'attachment' => [
-                'nullable',
-                'file',
-                'mimes:jpg,jpeg,png,pdf',
-                'max:5120',
-            ],
+            'time_log_id' => ['required', 'integer', 'exists:time_logs,id'],
+            'correction_type' => ['required', Rule::in(self::TYPES)],
+            'requested_time' => ['required', 'date_format:H:i'],
+            'reason' => ['required', 'string', 'min:5', 'max:2000'],
+            'attachment' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
         ]);
 
-        $userId = $request->user()->id;
-        $attachmentPath = null;
+        $path = null;
 
-        $correction = DB::transaction(function () use (
-            $request,
-            $data,
-            $userId,
-            &$attachmentPath
-        ) {
-            $log = TimeLog::query()
-                ->lockForUpdate()
-                ->findOrFail($data['time_log_id']);
+        try {
+            $record = DB::transaction(function () use ($request, $data, &$path) {
+                $log = TimeLog::query()
+                    ->lockForUpdate()
+                    ->findOrFail($data['time_log_id']);
 
-            if (
-                TimeLogCorrectionRequest::query()
+                // An approved request still needs to be applied before another is filed.
+                $hasActiveRequest = TimeLogCorrectionRequest::query()
                     ->where('time_log_id', $log->id)
-                    ->where('status', 'pending')
-                    ->exists()
-            ) {
-                throw ValidationException::withMessages([
-                    'time_log_id' =>
-                        'This time log already has a pending correction request.',
+                    ->whereIn('status', ['pending', 'approved'])
+                    ->exists();
+
+                if ($hasActiveRequest) {
+                    throw ValidationException::withMessages([
+                        'time_log_id' => [
+                            'This time log already has a pending or approved (unapplied) correction.',
+                        ],
+                    ]);
+                }
+
+                if ($request->hasFile('attachment')) {
+                    $path = $request->file('attachment')
+                        ->store('time-log-corrections', 'local');
+                }
+
+                return TimeLogCorrectionRequest::create([
+                    'time_log_id' => $log->id,
+                    'employee_id' => $log->employee_id,
+                    'requested_by' => $request->user()->getAuthIdentifier(),
+                    'correction_type' => $data['correction_type'],
+                    'status' => 'pending',
+                    'original_time_in' => $log->time_in,
+                    'original_time_out' => $log->time_out,
+                    'requested_time' => $data['requested_time'] . ':00',
+                    'reason' => trim($data['reason']),
+                    'attachment_path' => $path,
                 ]);
+            });
+        } catch (Throwable $e) {
+            if ($path) {
+                Storage::disk('local')->delete($path);
             }
-
-            $date = Carbon::parse($log->work_date)
-                ->format('Y-m-d');
-
-            $type = $data['correction_type'];
-
-            $requestedIn = $log->time_in;
-            $requestedOut = $log->time_out;
-            $requestedBreakOut = $log->break_out;
-            $requestedBreakIn = $log->break_in;
-
-            $makeDateTime = function (?string $time) use ($date) {
-                return $time ? "{$date} {$time}:00" : null;
-            };
-
-            if (in_array($type, ['time_in', 'time_in_out'])) {
-                $requestedIn = $makeDateTime(
-                    $data['requested_time_in'] ?? null
-                );
-            }
-
-            if (in_array($type, ['time_out', 'time_in_out'])) {
-                $requestedOut = $makeDateTime(
-                    $data['requested_time_out'] ?? null
-                );
-            }
-
-            if ($type === 'break_times') {
-                $requestedBreakOut = $makeDateTime(
-                    $data['requested_break_out'] ?? null
-                );
-
-                $requestedBreakIn = $makeDateTime(
-                    $data['requested_break_in'] ?? null
-                );
-            }
-
-            $this->validateIntervals(
-                $requestedIn,
-                $requestedOut,
-                $requestedBreakOut,
-                $requestedBreakIn
-            );
-
-            if ($request->hasFile('attachment')) {
-                $attachmentPath = $request
-                    ->file('attachment')
-                    ->store('time-log-corrections', 'local');
-            }
-
-            return TimeLogCorrectionRequest::create([
-                'time_log_id' => $log->id,
-                'employee_id' => $log->employee_id,
-                'requested_by' => $userId,
-                'correction_type' => $type,
-                'priority' => $data['priority'],
-                'status' => 'pending',
-
-                'original_time_in' => $log->time_in,
-                'original_time_out' => $log->time_out,
-                'original_break_out' => $log->break_out,
-                'original_break_in' => $log->break_in,
-
-                'requested_time_in' => $requestedIn,
-                'requested_time_out' => $requestedOut,
-                'requested_break_out' => $requestedBreakOut,
-                'requested_break_in' => $requestedBreakIn,
-
-                'reason' => $data['reason'],
-                'attachment_path' => $attachmentPath,
-            ]);
-        });
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Correction request submitted for review.',
-            'data' => $correction,
+            'data' => $record->load(['employee', 'requester', 'timeLog']),
         ], 201);
     }
 
-    public function approve(
-        Request $request,
-        TimeLogCorrectionRequest $correction
-    ): JsonResponse {
+    /** Step 1: approve only the request; do not update time_logs. */
+    public function approve(Request $request, TimeLogCorrectionRequest $correction): JsonResponse
+    {
         $this->authorizeReviewer($request);
 
         $data = $request->validate([
             'review_remarks' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        DB::transaction(function () use (
-            $request,
-            $correction,
-            $data
-        ) {
+        $item = DB::transaction(function () use ($request, $correction, $data) {
+            $item = TimeLogCorrectionRequest::query()
+                ->lockForUpdate()
+                ->findOrFail($correction->id);
+
+            if ($item->status !== 'pending') {
+                throw ValidationException::withMessages([
+                    'status' => ['Only pending correction requests can be approved.'],
+                ]);
+            }
+
+            if ((int) $item->requested_by === (int) $request->user()->getAuthIdentifier()) {
+                abort(403, 'You cannot approve your own request.');
+            }
+
+            // No time_logs mutation here.
+            $item->update([
+                'status' => 'approved',
+                'reviewed_by' => $request->user()->getAuthIdentifier(),
+                'review_remarks' => $data['review_remarks'] ?? null,
+                'reviewed_at' => now(),
+            ]);
+
+            return $item;
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Correction approved. Click Apply to Time Log to update attendance.',
+            'data' => $item->fresh(['employee', 'timeLog', 'requester', 'reviewer', 'applier']),
+        ]);
+    }
+
+    /** Step 2: only an approved, unapplied request may change the time log. */
+    public function apply(Request $request, TimeLogCorrectionRequest $correction): JsonResponse
+    {
+        $this->authorizeReviewer($request);
+
+        $item = DB::transaction(function () use ($request, $correction) {
+            // Lock time log first, then request (same order as store()).
             $log = TimeLog::query()
                 ->lockForUpdate()
                 ->findOrFail($correction->time_log_id);
@@ -306,250 +222,95 @@ class TimeLogCorrectionRequestController extends Controller
                 ->lockForUpdate()
                 ->findOrFail($correction->id);
 
-            if ($item->status !== 'pending') {
+            if ($item->status !== 'approved' || $item->applied_at !== null) {
                 throw ValidationException::withMessages([
-                    'status' => 'Request has already been reviewed.',
+                    'status' => ['Only approved, unapplied corrections can be applied.'],
                 ]);
             }
 
-            $hasActiveLateAdjustment = $log->lateAdjustments()
-                ->whereIn('status', ['pending', 'approved'])
-                ->exists();
+            if ((int) $item->requested_by === (int) $request->user()->getAuthIdentifier()) {
+                abort(403, 'You cannot apply your own correction request.');
+            }
 
-            if ($hasActiveLateAdjustment) {
+            if ((int) $item->time_log_id !== (int) $log->id) {
                 throw ValidationException::withMessages([
-                    'time_log_id' =>
-                        'This attendance has a pending or approved Late Adjustment. ' .
-                        'The late adjustment must be resolved or reconciled ' .
-                        'before the attendance can be corrected.',
+                    'time_log_id' => ['The correction no longer matches this time log.'],
                 ]);
             }
 
-            if ((int) $item->requested_by === (int) $request->user()->id) {
-                abort(403, 'You cannot approve your own request.');
-            }
-
-            // Prevent applying changes over a newer biometric
-            // import or another attendance modification.
-            foreach ([
-                'time_in',
-                'time_out',
-                'break_out',
-                'break_in',
-            ] as $field) {
-                $original = $item->{"original_{$field}"};
-                $current = $log->{$field};
-
-                if (
-                    $this->timestamp($original) !==
-                    $this->timestamp($current)
-                ) {
+            // Reject stale approvals: biometric imports or another correction may have changed the log.
+            foreach (['time_in', 'time_out'] as $field) {
+                if ($this->timestamp($item->{"original_{$field}"}) !== $this->timestamp($log->{$field})) {
                     throw ValidationException::withMessages([
-                        'time_log_id' =>
-                            'Attendance changed after this request was submitted. Review the latest time log first.',
+                        'time_log_id' => [
+                            'Attendance has changed since the correction was requested. '
+                            . 'Review the latest time log before applying.',
+                        ],
                     ]);
                 }
             }
 
-           
-$timeIn = $item->requested_time_in
-    ? Carbon::parse($item->requested_time_in)
-    : null;
+            $otherActive = TimeLogCorrectionRequest::query()
+                ->where('time_log_id', $log->id)
+                ->where('id', '!=', $item->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->exists();
 
-$timeOut = $item->requested_time_out
-    ? Carbon::parse($item->requested_time_out)
-    : null;
+            if ($otherActive) {
+                throw ValidationException::withMessages([
+                    'time_log_id' => [
+                        'Another correction is pending or approved for this time log. Resolve it first.',
+                    ],
+                ]);
+            }
 
-$breakOut = $item->requested_break_out
-    ? Carbon::parse($item->requested_break_out)
-    : null;
-
-$breakIn = $item->requested_break_in
-    ? Carbon::parse($item->requested_break_in)
-    : null;
-
-$this->validateIntervals(
-    $timeIn,
-    $timeOut,
-    $breakOut,
-    $breakIn
-);
-
-$date = Carbon::parse($log->work_date)->format('Y-m-d');
-$schedule = null;
-
-// Use schedule data recorded during attendance import first.
-$scheduledIn = $log->scheduled_time_in
-    ? Carbon::parse($log->scheduled_time_in)
-    : null;
-
-$scheduledOut = $log->scheduled_time_out
-    ? Carbon::parse($log->scheduled_time_out)
-    : null;
-
-$gracePeriod = $log->grace_period_minutes;
-
-// Use assigned work schedule only as fallback.
-if (!$scheduledIn || !$scheduledOut || $gracePeriod === null) {
-    $employment = Employment::query()
-        ->with('workSchedule')
-        ->where('employee_id', $log->employee_id)
-        ->whereDate('date_hired', '<=', $date)
-        ->orderByDesc('date_hired')
-        ->orderByDesc('id')
-        ->first();
-
-    $schedule = $employment?->workSchedule;
-
-    if (!$schedule) {
-        throw ValidationException::withMessages([
-            'time_log_id' =>
-                'No reliable work schedule was found for this attendance record.',
-        ]);
-    }
-
-    $scheduledIn ??= Carbon::parse(
-        $date . ' ' .
-        Carbon::parse($schedule->time_in)->format('H:i:s')
-    );
-
-    $scheduledOut ??= Carbon::parse(
-        $date . ' ' .
-        Carbon::parse($schedule->time_out)->format('H:i:s')
-    );
-
-    $gracePeriod ??= (int) ($schedule->grace_period ?? 0);
-    }
-
-    $gracePeriod = max(0, (int) $gracePeriod);
-
-    // Support shifts extending beyond midnight.
-    if ($scheduledOut->lessThanOrEqualTo($scheduledIn)) {
-        $scheduledOut->addDay();
-    }
-
-    // Calculate raw late and apply grace period.
-    $rawLate = null;
-    $graceAdjustedLate = null;
-
-    if ($timeIn) {
-        $rawLate = $timeIn->greaterThan($scheduledIn)
-            ? (int) floor(
-                $scheduledIn->diffInSeconds($timeIn) / 60
-            )
-            : 0;
-
-        $graceAdjustedLate = max(
-            0,
-            $rawLate - $gracePeriod
-        );
-    }
-
-    $undertime = null;
-
-    if ($timeOut) {
-        $undertime = $timeOut->lessThan($scheduledOut)
-            ? (int) floor(
-                $timeOut->diffInSeconds($scheduledOut) / 60
-            )
-            : 0;
-    }
-
-    // Calculate actual worked minutes.
-    $worked = 0;
-
-    if ($timeIn && $timeOut) {
-        $worked = (int) floor(
-            $timeIn->diffInSeconds($timeOut) / 60
-        );
-
-        if ($breakOut && $breakIn) {
-            $worked -= (int) floor(
-                $breakOut->diffInSeconds($breakIn) / 60
-            );
-        }
-
-        $worked = max(0, $worked);
-    }
-
-    $status = !$timeIn && !$timeOut
-        ? 'Missing'
-        : (!$timeIn || !$timeOut
-            ? 'Incomplete'
-            : 'Complete');
-
-    $log->update([
-    'time_in' => $timeIn,
-    'time_out' => $timeOut,
-    'break_out' => $breakOut,
-    'break_in' => $breakIn,
-
-    'work_schedule_id' => $log->work_schedule_id
-        ?? $schedule?->id
-        ?? null,
-
-    'scheduled_time_in' => $scheduledIn,
-    'scheduled_time_out' => $scheduledOut,
-
-    'raw_late_minutes' => $rawLate,
-    'late_minutes' => $rawLate ?? 0,
-    'grace_period_minutes' => $gracePeriod,
-    'chargeable_late_minutes' => $graceAdjustedLate,
-
-    'undertime_minutes' => $undertime ?? 0,
-    'worked_minutes' => $worked,
-
-    'status' => $status,
-    'source' => 'approved_correction',
-]);
+            // Intentionally no lateAdjustments() call: its foreign key is not time_log_id.
+            // Reintroduce a conflict check only after confirming the actual LateAdjustment schema.
+            $this->applyApprovedCorrectionToLog($log, $item);
 
             $item->update([
-                'status' => 'approved',
-                'reviewed_by' => $request->user()->id,
-                'review_remarks' => $data['review_remarks'] ?? null,
-                'reviewed_at' => now(),
+                'status' => 'applied',
+                'applied_by' => $request->user()->getAuthIdentifier(),
+                'applied_at' => now(),
             ]);
+
+            return $item;
         });
 
         return response()->json([
             'success' => true,
-            'message' => 'Correction approved and attendance updated.',
+            'message' => 'Approved correction applied to the employee time log.',
+            'data' => $item->fresh(['employee', 'timeLog', 'requester', 'reviewer', 'applier']),
         ]);
     }
 
-    public function reject(
-        Request $request,
-        TimeLogCorrectionRequest $correction
-    ): JsonResponse {
+    public function reject(Request $request, TimeLogCorrectionRequest $correction): JsonResponse
+    {
         $this->authorizeReviewer($request);
 
         $data = $request->validate([
-            'review_remarks' => [
-                'required', 'string', 'min:5', 'max:2000',
-            ],
+            'review_remarks' => ['required', 'string', 'min:5', 'max:2000'],
         ]);
 
-        DB::transaction(function () use (
-            $correction, $request, $data
-        ) {
+        DB::transaction(function () use ($request, $correction, $data) {
             $item = TimeLogCorrectionRequest::query()
                 ->lockForUpdate()
                 ->findOrFail($correction->id);
 
             if ($item->status !== 'pending') {
                 throw ValidationException::withMessages([
-                    'status' => 'Request has already been reviewed.',
+                    'status' => ['Only pending correction requests can be rejected.'],
                 ]);
             }
 
-            if ((int) $item->requested_by === (int) $request->user()->id) {
+            if ((int) $item->requested_by === (int) $request->user()->getAuthIdentifier()) {
                 abort(403, 'You cannot reject your own request.');
             }
 
             $item->update([
                 'status' => 'rejected',
-                'reviewed_by' => $request->user()->id,
-                'review_remarks' => $data['review_remarks'],
+                'reviewed_by' => $request->user()->getAuthIdentifier(),
+                'review_remarks' => trim($data['review_remarks']),
                 'reviewed_at' => now(),
             ]);
         });
@@ -560,65 +321,179 @@ if (!$scheduledIn || !$scheduledOut || $gracePeriod === null) {
         ]);
     }
 
-    private function timestamp($value): ?string
-    {
-        return $value
-            ? Carbon::parse($value)->format('Y-m-d H:i:s')
+    private function applyApprovedCorrectionToLog(
+        TimeLog $log,
+        TimeLogCorrectionRequest $item
+    ): void {
+        $date = $log->work_date->format('Y-m-d');
+        $schedule = null;
+
+        $scheduledIn = $log->scheduled_time_in
+            ? Carbon::parse($log->scheduled_time_in)
             : null;
+        $scheduledOut = $log->scheduled_time_out
+            ? Carbon::parse($log->scheduled_time_out)
+            : null;
+
+        if (!$scheduledIn || !$scheduledOut) {
+            $employment = Employment::query()
+                ->with('workSchedule')
+                ->where('employee_id', $log->employee_id)
+                ->whereDate('date_hired', '<=', $date)
+                ->orderByDesc('date_hired')
+                ->orderByDesc('id')
+                ->first();
+
+            $schedule = $employment?->workSchedule;
+
+            if (!$schedule) {
+                throw ValidationException::withMessages([
+                    'time_log_id' => ['No reliable work schedule was found for this attendance record.'],
+                ]);
+            }
+
+            $scheduledIn ??= Carbon::parse(
+                $date . ' ' . Carbon::parse($schedule->time_in)->format('H:i:s')
+            );
+            $scheduledOut ??= Carbon::parse(
+                $date . ' ' . Carbon::parse($schedule->time_out)->format('H:i:s')
+            );
+        }
+
+        $grace = max(0, (int) ($log->grace_period_minutes ?? $schedule?->grace_period ?? 0));
+
+        if ($scheduledOut->lessThanOrEqualTo($scheduledIn)) {
+            $scheduledOut->addDay();
+        }
+
+        $timeIn = $log->time_in ? Carbon::parse($log->time_in) : null;
+        $timeOut = $log->time_out ? Carbon::parse($log->time_out) : null;
+        $breakOut = $log->break_out ? Carbon::parse($log->break_out) : null;
+        $breakIn = $log->break_in ? Carbon::parse($log->break_in) : null;
+
+        $type = $item->correction_type;
+        $clock = (string) $item->requested_time;
+
+        if (!in_array($type, self::TYPES, true) ||
+            !preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/', $clock)) {
+            throw ValidationException::withMessages([
+                'requested_time' => ['The correction type or requested time is invalid.'],
+            ]);
+        }
+
+        if (strlen($clock) === 5) {
+            $clock .= ':00';
+        }
+
+        $requested = Carbon::parse($date . ' ' . $clock);
+
+        if ($type === 'time_in') {
+            // A time-only value cannot unambiguously represent a next-day Time In.
+            if ($scheduledOut->toDateString() > $date && $requested->lessThan($scheduledIn)) {
+                throw ValidationException::withMessages([
+                    'requested_time' => [
+                        'Overnight Time In may fall on the next calendar day. '
+                        . 'This time-only request cannot specify that date; review it before applying.',
+                    ],
+                ]);
+            }
+            $timeIn = $requested;
+        } else {
+            $isOvernight = $scheduledOut->toDateString() > $date
+                || ($timeOut && $timeOut->toDateString() > $date);
+            $referenceIn = $timeIn ?? $scheduledIn;
+
+            if ($isOvernight && $requested->lessThanOrEqualTo($referenceIn)) {
+                $requested->addDay();
+            }
+            $timeOut = $requested;
+        }
+
+        $this->validateIntervals($timeIn, $timeOut, $breakOut, $breakIn);
+
+        $rawLate = $timeIn
+            ? max(0, (int) floor($scheduledIn->diffInSeconds($timeIn, false) / 60))
+            : null;
+        $chargeableLate = $rawLate === null ? null : max(0, $rawLate - $grace);
+        $undertime = $timeOut
+            ? max(0, (int) floor($timeOut->diffInSeconds($scheduledOut, false) / 60))
+            : 0;
+
+        $worked = 0;
+        if ($timeIn && $timeOut) {
+            $worked = (int) floor($timeIn->diffInSeconds($timeOut, false) / 60);
+            if ($breakOut && $breakIn) {
+                $worked -= (int) floor($breakOut->diffInSeconds($breakIn, false) / 60);
+            }
+            $worked = max(0, $worked);
+        }
+
+        $status = !$timeIn && !$timeOut
+            ? 'Missing'
+            : (!$timeIn || !$timeOut ? 'Incomplete' : 'Complete');
+
+        // These fields change ONLY when Apply is called, never on Approve.
+        $log->update([
+            'time_in' => $timeIn,
+            'time_out' => $timeOut,
+            // Existing break_out and break_in are preserved.
+            'work_schedule_id' => $log->work_schedule_id ?? $schedule?->id,
+            'scheduled_time_in' => $scheduledIn,
+            'scheduled_time_out' => $scheduledOut,
+            'raw_late_minutes' => $rawLate,
+            'late_minutes' => $rawLate ?? 0,
+            'grace_period_minutes' => $grace,
+            'chargeable_late_minutes' => $chargeableLate,
+            'undertime_minutes' => $undertime,
+            'worked_minutes' => $worked,
+            'status' => $status,
+            'source' => 'approved_correction',
+        ]);
     }
 
-    private function validateIntervals(
-        $timeIn,
-        $timeOut,
-        $breakOut,
-        $breakIn
-    ): void {
+    private function timestamp($value): ?string
+    {
+        return $value ? Carbon::parse($value)->format('Y-m-d H:i:s') : null;
+    }
+
+    private function validateIntervals($timeIn, $timeOut, $breakOut, $breakIn): void
+    {
         $in = $timeIn ? Carbon::parse($timeIn) : null;
         $out = $timeOut ? Carbon::parse($timeOut) : null;
         $bOut = $breakOut ? Carbon::parse($breakOut) : null;
         $bIn = $breakIn ? Carbon::parse($breakIn) : null;
 
-        if ($in && $out && $out->lte($in)) {
+        if ($in && $out && ($out->lessThanOrEqualTo($in) || $in->diffInSeconds($out) > 86400)) {
             throw ValidationException::withMessages([
-                'requested_time_out' =>
-                    'Time Out must be later than Time In.',
+                'requested_time' => ['Time Out must be later than Time In, within 24 hours.'],
             ]);
         }
 
         if (($bOut && !$bIn) || (!$bOut && $bIn)) {
             throw ValidationException::withMessages([
-                'requested_break_in' =>
-                    'Both break times must be provided.',
+                'requested_time' => ['The existing break record is incomplete; ask HR to review it first.'],
             ]);
         }
 
-        if ($bOut && $bIn) {
-            if (
-                !$in || !$out ||
-                $bIn->lte($bOut) ||
-                $bOut->lt($in) ||
-                $bIn->gt($out)
-            ) {
-                throw ValidationException::withMessages([
-                    'requested_break_in' =>
-                        'Break interval must fall inside the work interval.',
-                ]);
-            }
+        if ($bOut && $bIn && (
+            $bIn->lessThanOrEqualTo($bOut)
+            || ($in && $bOut->lessThan($in))
+            || ($out && $bIn->greaterThan($out))
+        )) {
+            throw ValidationException::withMessages([
+                'requested_time' => ['The corrected time conflicts with the existing break interval.'],
+            ]);
         }
     }
 
-    /**
-     * Admin API: only Administrator/HR can inspect all staff records.
-     * Privileges still control the operation itself.
-     */
     private function authorizeAdminPrivilege(Request $request, string $name): void
     {
         $user = $request->user();
 
         abort_unless(
             $user
-            && in_array((int) $user->role_id, [1, 2], true)
-            && $user->hasPrivilege('timekeeping', $name),
+                && in_array((int) $user->role_id, [1, 2], true)
+                && $user->hasPrivilege('timekeeping', $name),
             403,
             'You are not authorized to perform this timekeeping action.'
         );

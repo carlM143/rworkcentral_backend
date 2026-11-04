@@ -29,19 +29,20 @@ return new class extends Migration
                 ->constrained('users')
                 ->nullOnDelete();
 
-            $table->string('correction_type', 50);
-            $table->string('priority', 20)->default('normal');
+            // Correction selection: Time In or Time Out
+            $table->enum('correction_type', [
+                'time_in',
+                'time_out',
+            ]);
+
             $table->string('status', 20)->default('pending');
 
+            // Original attendance snapshot
             $table->dateTime('original_time_in')->nullable();
             $table->dateTime('original_time_out')->nullable();
-            $table->dateTime('original_break_out')->nullable();
-            $table->dateTime('original_break_in')->nullable();
 
-            $table->dateTime('requested_time_in')->nullable();
-            $table->dateTime('requested_time_out')->nullable();
-            $table->dateTime('requested_break_out')->nullable();
-            $table->dateTime('requested_break_in')->nullable();
+            // Requested time only (HH:MM:SS)
+            $table->time('requested_time');
 
             $table->text('reason');
             $table->string('attachment_path')->nullable();
@@ -49,6 +50,14 @@ return new class extends Migration
             $table->timestamp('reviewed_at')->nullable();
 
             $table->timestamps();
+
+            $table->foreignId('applied_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            $table->timestamp('applied_at')
+                ->nullable();
 
             $table->index(['time_log_id', 'status']);
             $table->index(['employee_id', 'created_at']);

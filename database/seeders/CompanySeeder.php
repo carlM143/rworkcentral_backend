@@ -19,7 +19,6 @@ class CompanySeeder extends Seeder
             ['company_name' => 'R Work Central'],
             [
                 'admin_id' => $admin->id,
-                'location' => 'Metro Manila, Philippines',
                 'status' => true,
             ],
         );

@@ -242,6 +242,11 @@ Route::patch(
     [TimeLogCorrectionRequestController::class, 'reject']
 );
 
+Route::post(
+    '/time-log-corrections/{correction}/apply',
+    [TimeLogCorrectionRequestController::class, 'apply']
+);
+
 // ============================================
 // LATE ADJUSTMENTS
 // ============================================
