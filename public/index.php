@@ -2,6 +2,9 @@
 
 use Illuminate\Http\Request;
 
+// Temporary diagnostic: buffer early PHP output
+ob_start();
+
 define('LARAVEL_START', microtime(true));
 
 // Determine if the application is in maintenance mode...
