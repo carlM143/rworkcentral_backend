@@ -20,6 +20,20 @@ use Illuminate\Validation\Rule;
 
 class WorkCalendarController extends Controller
 {
+    public function holidays(Request $request)
+    {
+        $company = Company::firstOrFail();
+        $data = $request->validate([
+            'year' => ['required', 'integer', 'min:1900', 'max:9999'],
+            'location_id' => ['nullable', 'integer', Rule::exists('locations', 'id')->where('company_id', $company->id)],
+        ]);
+        $holidays = Holiday::with(['locations', 'holidayType', 'coveredEmployees:id'])->where('company_id', $company->id)->where('status', true)
+            ->whereYear('holiday_date', $data['year'])
+            ->when($data['location_id'] ?? null, fn ($q, $location) => $q->where(fn ($q) => $q->where('applies_to', 'all_locations')->orWhereHas('locations', fn ($q) => $q->where('locations.id', $location))))
+            ->orderBy('holiday_date')->orderBy('id')->get();
+        return response()->json(['data' => ['holidays' => $holidays, 'locations' => $company->locations, 'types' => HolidayType::where('status', true)->whereIn('type_code', ['REGULAR', 'SPECIAL', 'COMPANY', 'LOCAL'])->get()]]);
+    }
+
     public function index(Request $request)
     {
         $company = Company::firstOrFail();
@@ -168,7 +182,7 @@ class WorkCalendarController extends Controller
         $data = $request->validate([
             'holiday_name' => ['required', 'string', 'max:255'],
             'holiday_date' => ['required', 'date_format:Y-m-d'],
-            'holiday_type_id' => ['required', 'integer', Rule::exists('holiday_types', 'id')->where('status', true)],
+            'holiday_type_id' => ['required', 'integer', Rule::exists('holiday_types', 'id')->where(fn ($q) => $q->where(fn ($q) => $q->where('status', true)->whereIn('type_code', ['REGULAR', 'SPECIAL', 'COMPANY', 'LOCAL']))->when($holiday->exists, fn ($q) => $q->orWhere('id', $holiday->holiday_type_id)))],
             'is_working_day' => ['required', 'boolean'],
             'applies_to' => ['required', Rule::in(['all_locations', 'specific_locations'])],
             'location_ids' => ['required_if:applies_to,specific_locations', 'array'],
