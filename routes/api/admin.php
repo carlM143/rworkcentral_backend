@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
 use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
 use App\Http\Controllers\Api\Admin\ManualTimeEntryController;
+use App\Http\Controllers\Api\Admin\RestDaySwitchRequestController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================
@@ -310,4 +311,45 @@ Route::get(
     [ManualTimeEntryController::class, 'show']
 );
 
+
+/*
+|--------------------------------------------------------------------------
+| SWITCH REST DAY
+|--------------------------------------------------------------------------
+*/
+
+Route::get(
+    'switch-rest-day-requests',
+    [RestDaySwitchRequestController::class, 'index']
+);
+
+Route::post(
+    'switch-rest-day-requests',
+    [RestDaySwitchRequestController::class, 'store']
+);
+
+Route::get(
+    'switch-rest-day-requests/{restDaySwitchRequest}',
+    [RestDaySwitchRequestController::class, 'show']
+);
+
+Route::patch(
+    'switch-rest-day-requests/{restDaySwitchRequest}',
+    [RestDaySwitchRequestController::class, 'update']
+);
+
+Route::patch(
+    'switch-rest-day-requests/{restDaySwitchRequest}/approve',
+    [RestDaySwitchRequestController::class, 'approve']
+);
+
+Route::patch(
+    'switch-rest-day-requests/{restDaySwitchRequest}/reject',
+    [RestDaySwitchRequestController::class, 'reject']
+);
+
+Route::patch(
+    'switch-rest-day-requests/{restDaySwitchRequest}/cancel',
+    [RestDaySwitchRequestController::class, 'cancel']
+);
 
