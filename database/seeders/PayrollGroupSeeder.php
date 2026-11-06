@@ -13,12 +13,9 @@ class PayrollGroupSeeder extends Seeder
     public function run(): void
     {
         $groups = [
-            'Regular Employees',
-            'Probationary Employees',
-            'Contractual Employees',
+            'Regular Employees Group',
             'Project-Based Employees',
             'Management',
-            'Executive',
             'Drivers',
         ];
 

@@ -16,46 +16,18 @@ class PayrollPeriodSeeder extends Seeder
 
         $periods = [
             [
-                'period_name' => 'October 1–15, 2026',
+                'period_name' => 'November 12–15, 2026',
                 'cutoff_number' => 1,
-                'cutoff_start' => '2026-10-01',
-                'cutoff_end' => '2026-10-15',
-                'payment_date' => '2026-10-20',
-            ],
-            [
-                'period_name' => 'October 16–31, 2026',
-                'cutoff_number' => 2,
-                'cutoff_start' => '2026-10-16',
-                'cutoff_end' => '2026-10-31',
-                'payment_date' => '2026-11-05',
-            ],
-            [
-                'period_name' => 'November 1–15, 2026',
-                'cutoff_number' => 1,
-                'cutoff_start' => '2026-11-01',
+                'cutoff_start' => '2026-11-12',
                 'cutoff_end' => '2026-11-15',
                 'payment_date' => '2026-11-20',
             ],
             [
-                'period_name' => 'November 16–30, 2026',
+                'period_name' => 'November 27–30, 2026',
                 'cutoff_number' => 2,
-                'cutoff_start' => '2026-11-16',
+                'cutoff_start' => '2026-11-27',
                 'cutoff_end' => '2026-11-30',
                 'payment_date' => '2026-12-05',
-            ],
-            [
-                'period_name' => 'December 1–15, 2026',
-                'cutoff_number' => 1,
-                'cutoff_start' => '2026-12-01',
-                'cutoff_end' => '2026-12-15',
-                'payment_date' => '2026-12-20',
-            ],
-            [
-                'period_name' => 'December 16–31, 2026',
-                'cutoff_number' => 2,
-                'cutoff_start' => '2026-12-16',
-                'cutoff_end' => '2026-12-31',
-                'payment_date' => '2027-01-05',
             ],
         ];
 

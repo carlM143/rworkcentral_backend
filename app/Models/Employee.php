@@ -127,4 +127,26 @@ class Employee extends Model
     {
         return $this->hasMany(SalaryAdjustment::class);
     }
+
+    public function payrollGroupAssignments()
+    {
+        return $this->hasMany(EmployeePayrollGroupAssignment::class);
+    }
+
+    public function payrollGroups()
+    {
+        return $this->belongsToMany(
+            PayrollGroup::class,
+            'employee_payroll_group_assignments',
+            'employee_id',
+            'payroll_group_id'
+        )
+        ->withPivot([
+            'id',
+            'effective_from',
+            'effective_to',
+            'assigned_by',
+        ])
+        ->withTimestamps();
+    }
 }

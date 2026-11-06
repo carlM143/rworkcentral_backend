@@ -7,10 +7,18 @@ use App\Models\Company;
 use App\Models\PayrollPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class PayrollPeriodController extends Controller
 {
+    private const STATUS_FLOW = [
+        'draft' => ['open'],
+        'open' => ['draft', 'processing'],
+        'processing' => ['open', 'closed'],
+        'closed' => [],
+    ];
+
     private function companyId(Request $request): int
     {
         abort_unless($request->user(), 401, 'Unauthenticated.');
@@ -119,6 +127,40 @@ class PayrollPeriodController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Payroll period updated successfully.',
+            'data' => $payrollPeriod->fresh(),
+        ]);
+    }
+    
+
+    // PATCH /api/admin/payroll-periods/{payrollPeriod}/status
+    public function updateStatus(Request $request, PayrollPeriod $payrollPeriod): JsonResponse
+    {
+        $this->authorizePeriod($request, $payrollPeriod);
+
+        $data = $request->validate([
+            'status' => ['required', Rule::in(array_keys(self::STATUS_FLOW))],
+        ]);
+
+        $current = strtolower((string) $payrollPeriod->status);
+        $next = $data['status'];
+
+        if (!in_array($next, self::STATUS_FLOW[$current] ?? [], true)) {
+            throw ValidationException::withMessages([
+                'status' => "A {$current} payroll period cannot be changed to {$next}.",
+            ]);
+        }
+
+        if ($next === 'draft' && $payrollPeriod->payrolls()->exists()) {
+            throw ValidationException::withMessages([
+                'status' => 'This period already has payroll records and cannot go back to draft.',
+            ]);
+        }
+
+        $payrollPeriod->update(['status' => $next]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Payroll period is now ' . $next . '.',
             'data' => $payrollPeriod->fresh(),
         ]);
     }

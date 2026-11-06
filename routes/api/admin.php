@@ -32,6 +32,9 @@ use App\Http\Controllers\Api\Admin\TimeLogCorrectionRequestController;
 use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
 use App\Http\Controllers\Api\Admin\ManualTimeEntryController;
+use App\Http\Controllers\Api\Admin\EmployeeTransferController;
+use App\Http\Controllers\Api\Admin\PayrollReadinessController;
+use App\Http\Controllers\Api\Admin\PayrollGenerationController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================
@@ -84,13 +87,46 @@ Route::apiResource('contribution-deduction-settings', ContributionDeductionSetti
 Route::apiResource('companies', CompanyController::class);
 Route::get('company/current', [CompanyController::class, 'current']);
 
-// ============================================
-// PAYROLL
-// ============================================
+
+/*
+|--------------------------------------------------------------------------
+| PAYROLL GROUPS
+|--------------------------------------------------------------------------
+*/
+
+Route::prefix('payroll-groups')->group(function () {
+
+    Route::get('/', [PayrollGroupController::class, 'index']);
+    Route::post('/', [PayrollGroupController::class, 'store']);
+
+    // Must precede /{payrollGroup}
+    Route::get('/employee-filters', [PayrollGroupController::class, 'employeeFilters']);
+    Route::get('/employees', [PayrollGroupController::class, 'employees']);
+
+    Route::get('/{payrollGroup}', [PayrollGroupController::class, 'show']);
+    Route::match(['put', 'patch'], '/{payrollGroup}', [PayrollGroupController::class, 'update']);
+    Route::delete('/{payrollGroup}', [PayrollGroupController::class, 'destroy']);
+
+    Route::get('/{payrollGroup}/assignments', [PayrollGroupController::class, 'assignments']);
+    Route::post('/{payrollGroup}/assignments', [PayrollGroupController::class, 'assignEmployee']);
+    Route::post('/{payrollGroup}/assignments/bulk', [PayrollGroupController::class, 'bulkAssign']);
+
+    Route::patch(
+        '/{payrollGroup}/assignments/{assignment}/end',
+        [PayrollGroupController::class, 'endAssignment']
+    );
+});
 
 Route::get('salary-types', [SalaryTypeController::class, 'index']);
-Route::get('payroll-groups', [PayrollGroupController::class, 'index']);
 Route::apiResource('payroll-periods', PayrollPeriodController::class);
+
+Route::get('payroll-readiness', [PayrollReadinessController::class, 'index']);
+Route::patch('payroll-periods/{payrollPeriod}/status', [PayrollPeriodController::class, 'updateStatus']);
+
+
+Route::get('payroll-generation/{payrollPeriod}', [PayrollGenerationController::class, 'index']);
+Route::post('payroll-generation/{payrollPeriod}/generate', [PayrollGenerationController::class, 'generate']);
+Route::post('payroll-generation/{payrollPeriod}/finalize', [PayrollGenerationController::class, 'finalize']);
 
 // ============================================
 // LEAVE MANAGEMENT
@@ -321,5 +357,35 @@ Route::get(
     'manual-time-entries/{timeLog}',
     [ManualTimeEntryController::class, 'show']
 );
+
+
+
+/*
+|--------------------------------------------------------------------------
+| EMPLOYEE DEPARTMENT TRANSFERS
+|--------------------------------------------------------------------------
+*/
+
+Route::prefix('employee-department-transfers')->group(function () {
+
+    // CRUD
+    Route::get('/', [EmployeeTransferController::class, 'index']);
+    Route::post('/', [EmployeeTransferController::class, 'store']);
+    Route::get('/{transfer}', [EmployeeTransferController::class, 'show']);
+    Route::match(['put', 'patch'], '/{transfer}', [EmployeeTransferController::class, 'update']);
+    Route::delete('/{transfer}', [EmployeeTransferController::class, 'destroy']);
+
+    // Approval Workflow
+    Route::patch('/{transfer}/approve', [EmployeeTransferController::class, 'approve']);
+    Route::patch('/{transfer}/reject', [EmployeeTransferController::class, 'reject']);
+
+    // Apply Department Transfer
+    Route::post('/{transfer}/apply', [EmployeeTransferController::class, 'apply']);
+
+    // Cancel Transfer
+    Route::patch('/{transfer}/cancel', [EmployeeTransferController::class, 'cancel']);
+
+});
+
 
 
