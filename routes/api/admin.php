@@ -33,6 +33,8 @@ use App\Http\Controllers\Api\Admin\TimeLogImportController;
 use App\Http\Controllers\Api\Admin\UndertimeController;
 use App\Http\Controllers\Api\Admin\ManualTimeEntryController;
 use App\Http\Controllers\Api\Admin\RestDaySwitchRequestController;
+use App\Http\Controllers\Api\Admin\WfhDocumentController;
+use App\Http\Controllers\Api\Admin\WfhRequestController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================
@@ -353,3 +355,69 @@ Route::patch(
     [RestDaySwitchRequestController::class, 'cancel']
 );
 
+/*
+|--------------------------------------------------------------------------
+| WORK FROM HOME - DOCUMENT REVIEW
+|--------------------------------------------------------------------------
+*/
+ 
+Route::get(
+    'wfh-documents',
+    [WfhDocumentController::class, 'index']
+);
+ 
+Route::get(
+    'wfh-documents/{workFromHome}',
+    [WfhDocumentController::class, 'show']
+);
+ 
+Route::post(
+    'wfh-documents/{workFromHome}/days',
+    [WfhDocumentController::class, 'attach']
+);
+ 
+Route::patch(
+    'wfh-trackers/{wfhTracker}/accept',
+    [WfhDocumentController::class, 'accept']
+);
+ 
+Route::patch(
+    'wfh-trackers/{wfhTracker}/return',
+    [WfhDocumentController::class, 'returnDay']
+);
+
+/*
+|--------------------------------------------------------------------------
+| WORK FROM HOME - REQUESTS
+|--------------------------------------------------------------------------
+*/
+ 
+Route::get(
+    'wfh-requests/employees',
+    [WfhRequestController::class, 'employees']
+);
+ 
+Route::post(
+    'wfh-requests/preview',
+    [WfhRequestController::class, 'preview']
+);
+ 
+Route::get(
+    'wfh-requests',
+    [WfhRequestController::class, 'index']
+);
+ 
+Route::post(
+    'wfh-requests',
+    [WfhRequestController::class, 'store']
+);
+ 
+Route::patch(
+    'wfh-requests/{workFromHome}/approve',
+    [WfhRequestController::class, 'approve']
+);
+ 
+Route::patch(
+    'wfh-requests/{workFromHome}/reject',
+    [WfhRequestController::class, 'reject']
+);

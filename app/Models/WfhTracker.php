@@ -17,12 +17,17 @@ class WfhTracker extends Model
         'doc_path',
         'approved_by',
         'status',
+        'remarks',
+        'submitted_at',
+        'reviewed_at',
     ];
 
     protected function casts(): array
     {
         return [
             'date_attendance' => 'date',
+            'submitted_at' => 'datetime',
+            'reviewed_at' => 'datetime',
         ];
     }
 
@@ -33,10 +38,7 @@ class WfhTracker extends Model
 
     public function workFromHome(): BelongsTo
     {
-        return $this->belongsTo(
-            WorkFromHome::class,
-            'work_from_home_id'
-        );
+        return $this->belongsTo(WorkFromHome::class, 'work_from_home_id');
     }
 
     public function approvedBy(): BelongsTo
