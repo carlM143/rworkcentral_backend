@@ -31,6 +31,9 @@ class WorkCalendarTest extends TestCase
         $url = '/api/admin/work-calendar?start=2026-11-01&end=2026-11-30&location_id=';
         $this->getJson($url.$main->id)->assertOk()->assertJsonCount(1, 'data.holidays');
         $this->getJson($url.$branch->id)->assertOk()->assertJsonCount(0, 'data.holidays');
+        $this->getJson('/api/admin/work-calendar/holidays?year=2026&location_id='.$main->id)->assertOk()->assertJsonCount(1, 'data.holidays');
+        $this->getJson('/api/admin/work-calendar/holidays?year=2026&location_id='.$branch->id)->assertOk()->assertJsonCount(0, 'data.holidays');
+        $this->getJson('/api/admin/work-calendar/holidays?year=2027')->assertOk()->assertJsonCount(0, 'data.holidays');
         $this->putJson("/api/admin/work-calendar/{$id}", [...$payload, 'applies_to' => 'all_locations', 'location_ids' => [], 'is_working_day' => true])
             ->assertOk()->assertJsonPath('data.is_working_day', true)->assertJsonCount(0, 'data.locations');
         $this->getJson($url.$branch->id)->assertOk()->assertJsonCount(1, 'data.holidays');
@@ -146,5 +149,22 @@ class WorkCalendarTest extends TestCase
         Sanctum::actingAs($user);
         $this->deleteJson("/api/admin/calendar-events/{$eventId}")->assertOk();
         $this->getJson($url.$main->id)->assertOk()->assertJsonCount(0, 'data.company_events');
+
+        $coverageUrl = "/api/admin/work-calendar/holidays/{$all->id}/coverage";
+        $this->getJson($coverageUrl)->assertOk()->assertJsonPath('data.holiday.employee_coverage', 'all');
+        $this->putJson($coverageUrl, ['employee_coverage' => 'only', 'employee_ids' => []])->assertUnprocessable();
+        $this->putJson($coverageUrl, ['employee_coverage' => 'only', 'employee_ids' => [$employee->id]])->assertOk();
+        $this->getJson('/api/employee/calendar?start=2026-11-01&end=2026-11-30')->assertOk()->assertJsonFragment(['title' => 'Company Holiday']);
+        Sanctum::actingAs($otherUser);
+        $this->assertNotContains('Company Holiday', array_column($this->getJson('/api/employee/calendar?start=2026-11-01&end=2026-11-30')->assertOk()->json('data.events'), 'title'));
+        Sanctum::actingAs($user);
+        $this->putJson($coverageUrl, ['employee_coverage' => 'except', 'employee_ids' => [$employee->id]])->assertOk();
+        $this->assertNotContains('Company Holiday', array_column($this->getJson('/api/employee/calendar?start=2026-11-01&end=2026-11-30')->assertOk()->json('data.events'), 'title'));
+        Sanctum::actingAs($otherUser);
+        $this->getJson('/api/employee/calendar?start=2026-11-01&end=2026-11-30')->assertOk()->assertJsonFragment(['title' => 'Company Holiday']);
+        Sanctum::actingAs($user);
+        $this->putJson($coverageUrl, ['employee_coverage' => 'all', 'employee_ids' => []])->assertOk();
+        $this->assertDatabaseMissing('holiday_employee_coverage', ['holiday_id' => $all->id]);
+        $this->getJson('/api/admin/work-calendar/holidays?year=2026')->assertOk()->assertJsonFragment(['type_name' => 'Special Holiday'])->assertJsonFragment(['type_name' => 'Company Holiday']);
     }
 }

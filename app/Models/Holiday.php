@@ -38,6 +38,11 @@ class Holiday extends Model
         return $this->belongsToMany(Location::class, 'holiday_locations');
     }
 
+    public function coveredEmployees()
+    {
+        return $this->belongsToMany(Employee::class, 'holiday_employee_coverage');
+    }
+
     public function holidayType()
     {
         return $this->belongsTo(HolidayType::class);

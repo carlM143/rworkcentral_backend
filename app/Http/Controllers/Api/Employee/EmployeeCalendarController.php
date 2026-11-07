@@ -35,6 +35,11 @@ class EmployeeCalendarController extends Controller
                 if ($locationId) {
                     $query->orWhereHas('locations', fn ($q) => $q->where('locations.id', $locationId));
                 }
+            })
+            ->where(function ($query) use ($employee) {
+                $query->where('employee_coverage', 'all')
+                    ->orWhere(fn ($q) => $q->where('employee_coverage', 'only')->whereHas('coveredEmployees', fn ($q) => $q->where('employees.id', $employee->id)))
+                    ->orWhere(fn ($q) => $q->where('employee_coverage', 'except')->whereDoesntHave('coveredEmployees', fn ($q) => $q->where('employees.id', $employee->id)));
             })->get()->map(fn ($holiday) => [
                 'id' => 'holiday-'.$holiday->id,
                 'date' => $holiday->holiday_date->format('Y-m-d'),

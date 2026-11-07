@@ -134,6 +134,9 @@ Route::post('payroll-generation/{payrollPeriod}/finalize', [PayrollGenerationCon
 
 Route::apiResource('leave-types', LeaveTypesController::class);
 Route::get('work-calendar', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'index']);
+Route::get('work-calendar/holidays', [\App\Http\Controllers\Api\Admin\WorkCalendarController::class, 'holidays']);
+Route::get('work-calendar/holidays/{holiday}/coverage', [\App\Http\Controllers\Api\Admin\HolidayCoverageController::class, 'show']);
+Route::put('work-calendar/holidays/{holiday}/coverage', [\App\Http\Controllers\Api\Admin\HolidayCoverageController::class, 'update']);
 Route::post('calendar-events', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'store']);
 Route::put('calendar-events/{event}', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'update']);
 Route::delete('calendar-events/{event}', [\App\Http\Controllers\Api\Admin\CompanyCalendarEventController::class, 'destroy']);
@@ -357,15 +360,6 @@ Route::get(
     'manual-time-entries/{timeLog}',
     [ManualTimeEntryController::class, 'show']
 );
-
-
-
-/*
-|--------------------------------------------------------------------------
-| EMPLOYEE DEPARTMENT TRANSFERS
-|--------------------------------------------------------------------------
-*/
-
 Route::prefix('employee-department-transfers')->group(function () {
 
     // CRUD
@@ -384,8 +378,4 @@ Route::prefix('employee-department-transfers')->group(function () {
 
     // Cancel Transfer
     Route::patch('/{transfer}/cancel', [EmployeeTransferController::class, 'cancel']);
-
 });
-
-
-
