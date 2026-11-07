@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
 
             ScheduleTypeSeeder::class,
 
+            LocationSeeder::class,
             EmploymentTypeSeeder::class,
             EmploymentDocumentSeeder::class,
 

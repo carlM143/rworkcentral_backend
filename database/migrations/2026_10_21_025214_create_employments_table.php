@@ -13,6 +13,7 @@ return new class extends Migration
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
             $table->foreignId('employment_type_id')->constrained('employment_types')->restrictOnDelete();
             $table->foreignId('department_id')->constrained('departments')->restrictOnDelete();
+            $table->foreignId('location_id')->nullable()->constrained('locations')->restrictOnDelete();
             $table->foreignId('position_id')->constrained('positions')->restrictOnDelete();
             $table->foreignId('work_schedule_id')->nullable()->constrained('work_schedules')->restrictOnDelete();
             $table->date('date_hired');

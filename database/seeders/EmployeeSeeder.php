@@ -2,11 +2,13 @@
 
 namespace Database\Seeders;
 
+use App\Models\Company;
 use App\Models\ContactPerson;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Employment;
 use App\Models\EmploymentType;
+use App\Models\Location;
 use App\Models\Position;
 use App\Models\WorkSchedule;
 use Illuminate\Database\Seeder;
@@ -17,6 +19,8 @@ class EmployeeSeeder extends Seeder
     public function run(): void
     {
         $defaultSchedule = WorkSchedule::where('schedule_code', 'WS-001')->first();
+
+        $company = Company::where('company_name', 'R Work Central')->firstOrFail();
 
         $employees = [
             [
@@ -33,6 +37,7 @@ class EmployeeSeeder extends Seeder
                 'employment_type' => 'Regular',
                 'department_code' => 'RWS',
                 'position' => 'Web Developer',
+                'location' => 'Elreo',
                 'date_hired' => '2026-10-29',
                 'mobile' => '09171234567',
                 'residential_address' => 'El Reo, Butuan City',
@@ -58,6 +63,7 @@ class EmployeeSeeder extends Seeder
                 'employment_type' => 'Regular',
                 'department_code' => 'RWS',
                 'position' => 'Project Coordinator',
+                'location' => 'Elreo',
                 'date_hired' => '2025-03-10',
                 'mobile' => '09181234567',
                 'residential_address' => 'Ampayon, Butuan City',
@@ -83,6 +89,7 @@ class EmployeeSeeder extends Seeder
                 'employment_type' => 'Regular',
                 'department_code' => 'TECH',
                 'position' => 'Lead Technician',
+                'location' => 'Pasig',
                 'date_hired' => '2024-07-15',
                 'mobile' => '09173456789',
                 'residential_address' => 'Libertad, Butuan City',
@@ -108,6 +115,7 @@ class EmployeeSeeder extends Seeder
                 'employment_type' => 'Regular',
                 'department_code' => 'TECH',
                 'position' => 'Field Technician',
+                'location' => 'Pasig',
                 'date_hired' => '2023-11-20',
                 'mobile' => '09175678901',
                 'residential_address' => 'Bancasi, Butuan City',
@@ -129,6 +137,10 @@ class EmployeeSeeder extends Seeder
                 ->firstOrFail();
 
             $employmentType = EmploymentType::where('name', $item['employment_type'])->firstOrFail();
+
+            $location = Location::where('company_id', $company->id)
+                ->where('location_name', $item['location'])
+                ->firstOrFail();
 
             $employee = Employee::updateOrCreate(
                 [
@@ -157,6 +169,7 @@ class EmployeeSeeder extends Seeder
                 [
                     'employment_type_id' => $employmentType->id,
                     'department_id' => $department->id,
+                    'location_id' => $location->id,
                     'position_id' => $position->id,
                     'work_schedule_id' => $defaultSchedule?->id,
                     'date_hired' => $item['date_hired'],
@@ -179,6 +192,5 @@ class EmployeeSeeder extends Seeder
         }
 
         $this->call(EmployeeTimeLogCorrectionSeeder::class);
-
     }
 }

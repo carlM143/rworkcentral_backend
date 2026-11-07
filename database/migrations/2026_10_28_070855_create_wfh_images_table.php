@@ -18,8 +18,6 @@ return new class extends Migration
             $table->string('image_path');
 
             $table->timestamps();
-
-            $table->index('wfh_tracker_id');
         });
     }
 
