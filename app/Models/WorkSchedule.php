@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Carbon;
 
 class WorkSchedule extends Model
 {
@@ -60,5 +62,38 @@ class WorkSchedule extends Model
                 WHEN 'Sat' THEN 6
                 WHEN 'Sun' THEN 7
                 ELSE 8 END");
+    }
+
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(WorkScheduleRevision::class);
+    }
+
+    // The revision in effect today
+    public function currentRevision(): HasOne
+    {
+        return $this->hasOne(WorkScheduleRevision::class)->ofMany(
+            ['effective_from' => 'max', 'id' => 'max'],
+            fn ($q) => $q->where('effective_from', '<=', today()->toDateString())
+        );
+    }
+
+    // The next scheduled change, if any
+    public function upcomingRevision(): HasOne
+    {
+        return $this->hasOne(WorkScheduleRevision::class)->ofMany(
+            ['effective_from' => 'min', 'id' => 'min'],
+            fn ($q) => $q->where('effective_from', '>', today()->toDateString())
+        );
+    }
+
+    // Use this in payroll / timekeeping, never the parent columns
+    public function revisionFor($date): ?WorkScheduleRevision
+    {
+        return $this->revisions()
+            ->where('effective_from', '<=', Carbon::parse($date)->toDateString())
+            ->orderByDesc('effective_from')
+            ->with('days')
+            ->first();
     }
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Employee\EmployeeAttendanceController;
 use App\Http\Controllers\Api\Employee\EmployeeLeaveCreditController;
 use App\Http\Controllers\Api\Employee\EmployeeCalendarController;
 use App\Http\Controllers\Api\Employee\EmployeeLeaveTypesController;
@@ -12,6 +13,9 @@ use App\Http\Controllers\Api\Employee\UndertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogCorrectionRequestController;
 
 use Illuminate\Support\Facades\Route;
+
+// Attendance (QR scan: first scan = time in, next scan = time out)
+Route::post('/attendance/scan', [EmployeeAttendanceController::class, 'scan']);
 
 // Profile & Account Settings
 Route::get('/profile', [EmployeeProfileController::class, 'show']);

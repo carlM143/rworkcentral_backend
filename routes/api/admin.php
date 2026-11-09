@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\Admin\WfhDocumentController;
 use App\Http\Controllers\Api\Admin\WfhRequestController;
 use App\Http\Controllers\Api\Admin\WorkCalendarController;
 use App\Http\Controllers\Api\Admin\GenerateQrCodeController;
+use App\Http\Controllers\Api\Admin\QrCodeGenerationController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -319,6 +320,8 @@ Route::post('payroll-generation/{payrollPeriod}/finalize', [PayrollGenerationCon
 // ============================================
 // QR GENERATION
 // ============================================
+Route::post('attendance-qr/generate', [QrCodeGenerationController::class, 'generate']);
+
 Route::prefix('attendance-qr/sessions')->group(function () {
     Route::post('/', [GenerateQrCodeController::class, 'store']);
     Route::post('{session}/refresh', [GenerateQrCodeController::class, 'refresh']);

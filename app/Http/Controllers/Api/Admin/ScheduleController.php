@@ -4,19 +4,29 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\WorkSchedule;
-use App\Models\WorkScheduleDay;
+use App\Services\WorkScheduleRevisionService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ScheduleController extends Controller
 {
+    private const RELATIONS = [
+        'scheduleType:id,type_name',
+        'days',
+        'currentRevision',
+        'upcomingRevision.days',
+    ];
+
+    public function __construct(private WorkScheduleRevisionService $revisions) {}
+
     // GET ALL WORK SCHEDULES
     public function index(Request $request)
     {
         $query = WorkSchedule::query()
-            ->with(['scheduleType:id,type_name', 'days'])
+            ->with(self::RELATIONS)
             ->withCount('employments');
 
         if ($request->filled('search')) {
@@ -43,29 +53,22 @@ class ScheduleController extends Controller
         ]);
     }
 
-    // CREATE WORK SCHEDULE AND SEVEN DAYS
+    // CREATE WORK SCHEDULE WITH ITS FIRST REVISION
     public function store(Request $request)
     {
         $validated = $this->validateSchedule($request);
+        [$master, $config, $days, $meta] = $this->splitPayload($validated);
 
-        $days = $validated['days'];
-        unset($validated['days']);
+        $schedule = DB::transaction(function () use ($master, $config, $days, $meta) {
+            $schedule = WorkSchedule::create($master + $config);
 
-        // Existing nullable columns in the parent table.
-        $validated['break_start'] = null;
-        $validated['break_end'] = null;
+            $revision = $this->revisions->create(
+                $schedule, $config, $days,
+                $meta['effective_from'] ?? today()->toDateString(),
+                $meta['reason'] ?? 'Initial schedule'
+            );
 
-        $schedule = DB::transaction(function () use ($validated, $days) {
-            $schedule = WorkSchedule::create($validated);
-
-            foreach ($days as $day) {
-                $schedule->days()->create([
-                    'day_of_week' => $day['day_of_week'],
-                    'is_working_day' => true,
-                    'time_in' => $day['time_in'],
-                    'time_out' => $day['time_out'],
-                ]);
-            }
+            $this->revisions->applyToSchedule($schedule, $revision);
 
             return $schedule;
         });
@@ -73,66 +76,89 @@ class ScheduleController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Work schedule created successfully.',
-            'data' => $schedule
-                ->load(['scheduleType:id,type_name', 'days'])
-                ->loadCount('employments'),
+            'data' => $schedule->fresh()->load(self::RELATIONS)->loadCount('employments'),
         ], 201);
     }
 
-    // SHOW WORK SCHEDULE WITH DAILY CONFIGURATIONS
+    // SHOW WORK SCHEDULE WITH CURRENT, UPCOMING AND HISTORY
     public function show(WorkSchedule $workSchedule)
     {
+        $workSchedule
+            ->load([
+                'scheduleType:id,type_name',
+                'days',
+                'revisions' => fn ($q) => $q->orderByDesc('effective_from')->orderByDesc('id')->with('days'),
+            ])
+            ->loadCount('employments');
+
+        $today = today();
+
+        [$upcoming, $started] = $workSchedule->revisions
+            ->partition(fn ($r) => $r->effective_from->gt($today));
+
+        $upcoming = $upcoming->sortBy('effective_from')->values();
+        $current  = $started->first();
+        $history  = $started->slice(1)->values();
+
+        // Same keys as index() for current/upcoming, plus the full breakdown
+        $workSchedule
+            ->unsetRelation('revisions')
+            ->setRelation('currentRevision', $current)
+            ->setRelation('upcomingRevision', $upcoming->first());
+
         return response()->json([
             'success' => true,
             'message' => 'Work schedule retrieved successfully.',
-            'data' => $workSchedule
-                ->load(['scheduleType:id,type_name', 'days'])
-                ->loadCount('employments'),
+            'data' => array_merge($workSchedule->toArray(), [
+                'upcoming_revisions' => $upcoming,
+                'revision_history'   => $history,
+            ]),
         ]);
     }
 
-    // UPDATE WORK SCHEDULE AND SEVEN DAYS
+    // UPDATE: master fields apply now, hour/day changes become a dated revision
     public function update(Request $request, WorkSchedule $workSchedule)
     {
         $validated = $this->validateSchedule($request, $workSchedule);
+        [$master, $config, $days, $meta] = $this->splitPayload($validated);
 
-        $days = $validated['days'];
-        unset($validated['days']);
+        $revision = DB::transaction(function () use ($workSchedule, $master, $config, $days, $meta) {
+            $workSchedule->update($master);
 
-        $validated['break_start'] = null;
-        $validated['break_end'] = null;
+            $latest = $workSchedule->revisions()
+                ->orderByDesc('effective_from')
+                ->with('days')
+                ->first();
 
-        DB::transaction(function () use ($workSchedule, $validated, $days) {
-            $workSchedule->update($validated);
-
-            $workingDayNames = array_column($days, 'day_of_week');
-            WorkScheduleDay::query()
-                ->where('work_schedule_id', $workSchedule->id)
-                ->whereNotIn('day_of_week', $workingDayNames)
-                ->delete();
-
-            foreach ($days as $day) {
-                WorkScheduleDay::updateOrCreate(
-                    [
-                        'work_schedule_id' => $workSchedule->id,
-                        'day_of_week' => $day['day_of_week'],
-                    ],
-                    [
-                        'is_working_day' => true,
-                        'time_in' => $day['time_in'],
-                        'time_out' => $day['time_out'],
-                    ]
-                );
+            if (! $this->revisions->hasChanged($latest, $config, $days)) {
+                return null;
             }
+
+            if (empty($meta['effective_from'])) {
+                throw ValidationException::withMessages([
+                    'effective_from' => 'Effective date is required when changing working hours, grace period, or days.',
+                ]);
+            }
+
+            $revision = $this->revisions->change(
+                $workSchedule, $config, $days, $meta['effective_from'], $meta['reason'] ?? null
+            );
+
+            if (! $revision->effective_from->isFuture()) {
+                $this->revisions->applyToSchedule($workSchedule, $revision);
+            }
+
+            return $revision;
         });
+
+        $message = $revision && $revision->effective_from->isFuture()
+            ? "Schedule change saved. It takes effect on {$revision->effective_from->format('M j, Y')}."
+            : 'Work schedule updated successfully.';
 
         return response()->json([
             'success' => true,
-            'message' => 'Work schedule updated successfully.',
-            'data' => $workSchedule
-                ->fresh()
-                ->load(['scheduleType:id,type_name', 'days'])
-                ->loadCount('employments'),
+            'message' => $message,
+            'data' => $workSchedule->fresh()->load(self::RELATIONS)->loadCount('employments'),
         ]);
     }
 
@@ -146,7 +172,7 @@ class ScheduleController extends Controller
             ], 409);
         }
 
-        $workSchedule->delete();
+        $workSchedule->delete(); // revisions cascade
 
         return response()->json([
             'success' => true,
@@ -154,42 +180,39 @@ class ScheduleController extends Controller
         ]);
     }
 
-    // VALIDATE PARENT SCHEDULE AND ALL SEVEN DAYS
-    private function validateSchedule(
-        Request $request,
-        ?WorkSchedule $workSchedule = null
-    ): array {
+    private function splitPayload(array $validated): array
+    {
+        return [
+            Arr::only($validated, ['schedule_type_id', 'schedule_code', 'schedule_name', 'status']),
+            Arr::only($validated, ['required_work_hours', 'grace_period']) + ['break_start' => null, 'break_end' => null],
+            $validated['days'],
+            Arr::only($validated, ['effective_from', 'reason']),
+        ];
+    }
+
+    // VALIDATE PARENT SCHEDULE, DAYS AND EFFECTIVE DATE
+    private function validateSchedule(Request $request, ?WorkSchedule $workSchedule = null): array
+    {
         $validated = $request->validate([
-            'schedule_type_id' => [
-                'required',
-                'integer',
-                Rule::exists('schedule_types', 'id'),
-            ],
+            'schedule_type_id' => ['required', 'integer', Rule::exists('schedule_types', 'id')],
             'schedule_code' => [
-                'required',
-                'string',
-                'max:50',
-                Rule::unique('work_schedules', 'schedule_code')
-                    ->ignore($workSchedule?->id),
+                'required', 'string', 'max:50',
+                Rule::unique('work_schedules', 'schedule_code')->ignore($workSchedule?->id),
             ],
             'schedule_name' => ['required', 'string', 'max:255'],
             'required_work_hours' => ['required', 'numeric', 'gt:0', 'lte:24'],
             'grace_period' => ['required', 'integer', 'between:0,120'],
             'status' => ['required', 'boolean'],
 
-            'days' => ['required', 'array', 'min:1', 'max:7'],
+            'effective_from' => $workSchedule
+                ? ['nullable', 'date', 'after_or_equal:today']
+                : ['nullable', 'date'],
+            'reason' => ['nullable', 'string', 'max:255'],
 
+            'days' => ['required', 'array', 'min:1', 'max:7'],
             'days.*.day_of_week' => [
                 'required',
-                Rule::in([
-                    'Monday',
-                    'Tuesday',
-                    'Wednesday',
-                    'Thursday',
-                    'Friday',
-                    'Sat',
-                    'Sun',
-                ]),
+                Rule::in(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']),
             ],
             'days.*.is_working_day' => ['sometimes', 'boolean'],
             'days.*.time_in' => ['nullable', 'date_format:H:i'],
@@ -197,8 +220,6 @@ class ScheduleController extends Controller
         ]);
 
         $days = $validated['days'];
-
-        // A row represents a working day. Missing or unchecked days are rest days.
         $dayNames = array_column($days, 'day_of_week');
 
         if (count(array_unique($dayNames)) !== count($dayNames)) {
@@ -210,12 +231,11 @@ class ScheduleController extends Controller
         $workingDays = [];
 
         foreach ($days as $index => $day) {
-            $isWorkingDay = (bool) ($day['is_working_day'] ?? true);
-            $dayName = $day['day_of_week'];
-
-            if (! $isWorkingDay) {
+            if (! (bool) ($day['is_working_day'] ?? true)) {
                 continue;
             }
+
+            $dayName = $day['day_of_week'];
 
             if (empty($day['time_in']) || empty($day['time_out'])) {
                 throw ValidationException::withMessages([
