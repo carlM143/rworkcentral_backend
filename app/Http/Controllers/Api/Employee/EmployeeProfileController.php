@@ -22,6 +22,7 @@ class EmployeeProfileController extends Controller
         'governmentRequirements',
         'employments.employmentType',
         'employments.department',
+        'employments.location',
         'employments.position',
         'employments.workSchedule.scheduleType',
         'employments.workSchedule.days',
@@ -42,7 +43,7 @@ class EmployeeProfileController extends Controller
 
         $data = $employee->load(self::PROFILE_RELATIONSHIPS)->toArray();
         $currentEmployment = $employee->employments()
-            ->with(['employmentType', 'department', 'position', 'workSchedule.scheduleType', 'workSchedule.days'])
+            ->with(['employmentType', 'department', 'location', 'position', 'workSchedule.scheduleType', 'workSchedule.days'])
             ->orderByDesc('date_hired')
             ->orderByDesc('id')
             ->first();
