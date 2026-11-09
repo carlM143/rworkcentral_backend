@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Employee;
+use App\Models\TimeLog;
 use App\Models\WfhTracker;
 use App\Models\WorkFromHome;
 use App\Services\WfhScheduleService;
@@ -160,7 +161,7 @@ class WfhDocumentController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'WFH day accepted.',
+            'message' => 'WFH day verified and recorded as attendance.',
             'data' => $this->freshDetail($tracker->work_from_home_id),
         ]);
     }
@@ -200,8 +201,96 @@ class WfhDocumentController extends Controller
                 'remarks' => $remarks ?? $record->remarks,
             ]);
 
+            if ($status === 'accepted') {
+                $this->recordAttendance($record, $remarks);
+            }
+
             return $record;
         });
+    }
+
+    /**
+     * Record a verified WFH day as a complete attendance log in time_logs.
+     */
+    private function recordAttendance(WfhTracker $tracker, ?string $remarks = null): void
+    {
+        $tracker->load([
+            'workFromHome',
+            'employee.latestEmployment.workSchedule.days',
+            'employee.employments.workSchedule.days',
+        ]);
+
+        $workDate = $tracker->date_attendance->toDateString();
+        $wfh = $tracker->workFromHome;
+        if ($wfh && $tracker->employee) {
+            $wfh->setRelation('employee', $tracker->employee);
+        }
+
+        $schedule = $wfh ? $this->schedule->getWorkSchedule($wfh) : null;
+        $dayPrefix = strtolower(substr(Carbon::parse($workDate)->format('l'), 0, 3));
+
+        $scheduleDay = $schedule?->days
+            ?->first(fn ($d) => strtolower(substr(trim((string) $d->day_of_week), 0, 3)) === $dayPrefix);
+
+        $timeInStr = $scheduleDay?->time_in ?: ($schedule?->time_in ?: '08:00:00');
+        $timeOutStr = $scheduleDay?->time_out ?: ($schedule?->time_out ?: '17:00:00');
+
+        $scheduledIn = Carbon::parse("{$workDate} {$timeInStr}");
+        $scheduledOut = Carbon::parse("{$workDate} {$timeOutStr}");
+
+        if ($scheduledOut->lessThanOrEqualTo($scheduledIn)) {
+            $scheduledOut->addDay();
+        }
+
+        $rawMinutes = max(0, (int) $scheduledIn->diffInMinutes($scheduledOut));
+        $workedMinutes = $rawMinutes >= 480 ? $rawMinutes - 60 : $rawMinutes;
+        $requestNo = $wfh?->request_no ?? 'WFH';
+
+        $existingLog = TimeLog::query()
+            ->where('employee_id', $tracker->employee_id)
+            ->whereDate('work_date', $workDate)
+            ->first();
+
+        $actualIn = $existingLog?->time_in ?? $scheduledIn;
+        $actualOut = $existingLog?->time_out ?? $scheduledOut;
+        $actualWorkedMinutes = ($existingLog && $existingLog->worked_minutes > 0)
+            ? (int) $existingLog->worked_minutes
+            : $workedMinutes;
+
+        if ($existingLog) {
+            $existingLog->update([
+                'work_schedule_id' => $schedule?->id ?? $existingLog->work_schedule_id,
+                'scheduled_time_in' => $scheduledIn,
+                'scheduled_time_out' => $scheduledOut,
+                'time_in' => $actualIn,
+                'time_out' => $actualOut,
+                'worked_minutes' => $actualWorkedMinutes,
+                'source' => 'wfh',
+                'status' => 'complete',
+                'remarks' => trim("Verified WFH Attendance ({$requestNo})" . ($remarks ? " — {$remarks}" : '')),
+            ]);
+            return;
+        }
+
+        TimeLog::create([
+            'employee_id' => $tracker->employee_id,
+            'work_date' => $workDate,
+            'work_schedule_id' => $schedule?->id,
+            'scheduled_time_in' => $scheduledIn,
+            'scheduled_time_out' => $scheduledOut,
+            'time_in' => $actualIn,
+            'time_out' => $actualOut,
+            'late_minutes' => 0,
+            'raw_late_minutes' => 0,
+            'grace_period_minutes' => (int) ($schedule?->grace_period ?? 0),
+            'chargeable_late_minutes' => 0,
+            'undertime_minutes' => 0,
+            'worked_minutes' => $actualWorkedMinutes,
+            'overtime_minutes' => 0,
+            'source' => 'wfh',
+            'status' => 'complete',
+            'remarks' => trim("Verified WFH Attendance ({$requestNo})" . ($remarks ? " — {$remarks}" : '')),
+        ]);
     }
 
     // =====================================================
@@ -219,8 +308,8 @@ class WfhDocumentController extends Controller
             'employee.latestEmployment',
             'employee.latestEmployment.department:id,department_name',
             'employee.latestEmployment.position:id,position',
-            'employee.latestEmployment.workSchedule:id,schedule_code,schedule_name',
-            'employee.latestEmployment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day',
+            'employee.latestEmployment.workSchedule:id,schedule_code,schedule_name,grace_period',
+            'employee.latestEmployment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day,time_in,time_out',
             'approvedBy:id,name',
             'trackers' => fn ($query) => $query->orderBy('date_attendance'),
             'trackers.images',
@@ -228,14 +317,14 @@ class WfhDocumentController extends Controller
         ];
     }
 
-    private function freshDetail(int $workFromHomeId): array
+    public function freshDetail(int $workFromHomeId): array
     {
         return $this->formatDetail(
             WorkFromHome::query()->with($this->relations())->findOrFail($workFromHomeId)
         );
     }
 
-    private function formatDetail(WorkFromHome $wfh): array
+    public function formatDetail(WorkFromHome $wfh): array
     {
         return [
             ...$this->formatSummary($wfh),
@@ -243,7 +332,7 @@ class WfhDocumentController extends Controller
         ];
     }
 
-    private function formatSummary(WorkFromHome $wfh): array
+    public function formatSummary(WorkFromHome $wfh): array
     {
         $days = collect($this->formatDays($wfh));
         $count = fn (string $status): int => $days->where('status', $status)->count();
@@ -289,7 +378,7 @@ class WfhDocumentController extends Controller
      *
      * @return array<int, array<string, mixed>>
      */
-    private function formatDays(WorkFromHome $wfh): array
+    public function formatDays(WorkFromHome $wfh): array
     {
         $trackers = $wfh->trackers->keyBy(
             fn (WfhTracker $tracker): string => $tracker->date_attendance->toDateString()
@@ -349,11 +438,29 @@ class WfhDocumentController extends Controller
 
     private function fileInfo(string $path): array
     {
+        $cleanPath = ltrim($path, '/');
+        $isPdf = str_ends_with(strtolower($cleanPath), '.pdf');
+        $publicUrl = str_starts_with($path, 'http')
+            ? $path
+            : asset('storage/'.$cleanPath);
+
+        $inlineUrl = $publicUrl;
+        if (! $isPdf && Storage::disk('public')->exists($cleanPath)) {
+            try {
+                $bytes = Storage::disk('public')->get($cleanPath);
+                $mime = Storage::disk('public')->mimeType($cleanPath) ?: 'image/jpeg';
+                $inlineUrl = 'data:'.$mime.';base64,'.base64_encode($bytes);
+            } catch (Throwable) {
+                $inlineUrl = $publicUrl;
+            }
+        }
+
         return [
             'path' => $path,
-            'url' => Storage::disk('public')->url($path),
+            'url' => $inlineUrl,
+            'public_url' => $publicUrl,
             'name' => basename($path),
-            'mime' => str_ends_with(strtolower($path), '.pdf') ? 'application/pdf' : 'image',
+            'mime' => $isPdf ? 'application/pdf' : 'image',
         ];
     }
 }

@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\WorkFromHome;
+use App\Models\WorkSchedule;
+use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 
 class WfhScheduleService
@@ -29,7 +31,8 @@ class WfhScheduleService
      */
     public function workingDayNames(WorkFromHome $wfh): array
     {
-        $days = $wfh->employee?->latestEmployment?->workSchedule?->days ?? collect();
+        $schedule = $this->getWorkSchedule($wfh);
+        $days = $schedule?->days ?? collect();
 
         return $days
             ->where('is_working_day', true)
@@ -38,6 +41,28 @@ class WfhScheduleService
             ->unique()
             ->values()
             ->all();
+    }
+
+    public function getWorkSchedule(WorkFromHome $wfh): ?WorkSchedule
+    {
+        $employee = $wfh->employee;
+        if (! $employee) {
+            return null;
+        }
+
+        $schedule = $employee->latestEmployment?->workSchedule;
+        if ($schedule) {
+            return $schedule;
+        }
+
+        if ($employee->relationLoaded('employments')) {
+            $current = $employee->employments->sortByDesc('date_hired')->first();
+            if ($current?->workSchedule) {
+                return $current->workSchedule;
+            }
+        }
+
+        return null;
     }
 
     public function hasSchedule(WorkFromHome $wfh): bool
@@ -67,5 +92,75 @@ class WfhScheduleService
         }
 
         return $dates;
+    }
+
+    /**
+     * Complete breakdown of dates in range checked against employee's schedule.
+     *
+     * @return array{
+     *     number_of_days: int,
+     *     calendar_days: int,
+     *     working_dates: array<int, string>,
+     *     breakdown: array<int, array{date: string, day_name: string, is_working_day: bool}>,
+     *     schedule_name: ?string,
+     *     schedule_code: ?string,
+     *     working_days: array<int, string>,
+     *     rest_days: array<int, string>
+     * }
+     */
+    public function scheduleBreakdown(WorkFromHome $wfh): array
+    {
+        $schedule = $this->getWorkSchedule($wfh);
+        $scheduleDays = $schedule?->days ?? collect();
+        $workingDayNames = $this->workingDayNames($wfh);
+        $allWeekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        $restDayNames = $workingDayNames === []
+            ? []
+            : array_values(array_diff($allWeekdays, $workingDayNames));
+
+        $dayTimes = [];
+        foreach ($scheduleDays as $day) {
+            $normalizedName = self::DAY_MAP[strtolower(substr(trim((string) $day->day_of_week), 0, 3))] ?? null;
+            if ($normalizedName && $day->is_working_day) {
+                $timeIn = $day->time_in ? Carbon::parse($day->time_in)->format('g:i A') : null;
+                $timeOut = $day->time_out ? Carbon::parse($day->time_out)->format('g:i A') : null;
+                $dayTimes[$normalizedName] = ($timeIn && $timeOut) ? "{$timeIn} – {$timeOut}" : 'Regular Shift';
+            }
+        }
+
+        $workingDates = [];
+        $breakdown = [];
+        $totalCalendarDays = 0;
+
+        if ($wfh->start_date && $wfh->end_date) {
+            foreach (CarbonPeriod::create($wfh->start_date, $wfh->end_date) as $date) {
+                $totalCalendarDays++;
+                $dayName = $date->format('l');
+                $dateStr = $date->toDateString();
+                $isWorking = $workingDayNames === [] || in_array($dayName, $workingDayNames, true);
+
+                if ($isWorking) {
+                    $workingDates[] = $dateStr;
+                }
+
+                $breakdown[] = [
+                    'date' => $dateStr,
+                    'day_name' => $dayName,
+                    'is_working_day' => $isWorking,
+                    'schedule_time' => $isWorking ? ($dayTimes[$dayName] ?? 'Regular Shift') : null,
+                ];
+            }
+        }
+
+        return [
+            'number_of_days' => count($workingDates),
+            'calendar_days' => $totalCalendarDays,
+            'working_dates' => $workingDates,
+            'breakdown' => $breakdown,
+            'schedule_name' => $schedule?->schedule_name ?? $schedule?->schedule_code ?? null,
+            'schedule_code' => $schedule?->schedule_code ?? null,
+            'working_days' => $workingDayNames,
+            'rest_days' => $restDayNames,
+        ];
     }
 }

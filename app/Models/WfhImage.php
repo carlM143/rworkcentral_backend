@@ -12,6 +12,7 @@ class WfhImage extends Model
     protected $fillable = [
         'wfh_tracker_id',
         'image_path',
+        'original_name',
     ];
 
     public function tracker(): BelongsTo

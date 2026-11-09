@@ -7,6 +7,8 @@ use App\Models\Department;
 use App\Models\Employee;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -25,7 +27,17 @@ class EmployeeWfhRequestTest extends TestCase
         $other = Employee::create(['user_id' => $otherUser->id, 'department_id' => $department->id, 'emp_id' => 87654321, 'firstname' => 'Other', 'lastname' => 'Employee', 'birthday' => '1990-01-01', 'status' => true]);
         Sanctum::actingAs($user);
         $payload = ['employee_id' => $other->id, 'start_date' => '2026-11-09', 'end_date' => '2026-11-10', 'supervisor_name' => 'Supervisor', 'reason' => 'Home work', 'request_date' => '2000-01-01'];
-        $this->postJson('/api/employee/wfh-requests/preview', $payload)->assertOk()->assertJsonPath('data.number_of_days', 2);
+        $this->postJson('/api/employee/wfh-requests/preview', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.number_of_days', 2)
+            ->assertJsonStructure([
+                'data' => [
+                    'number_of_days',
+                    'breakdown' => [
+                        '*' => ['date', 'day_name', 'is_working_day', 'schedule_time'],
+                    ],
+                ],
+            ]);
         $id = $this->postJson('/api/employee/wfh-requests', $payload)->assertCreated()->assertJsonPath('data.employee.id', $employee->id)->assertJsonPath('data.status', 'pending')->json('data.id');
         $this->assertDatabaseHas('work_from_home', ['id' => $id, 'employee_id' => $employee->id]);
         $this->assertSame(now()->toDateString(), \App\Models\WorkFromHome::findOrFail($id)->request_date->toDateString());
@@ -36,7 +48,69 @@ class EmployeeWfhRequestTest extends TestCase
         $this->getJson('/api/admin/wfh-requests')->assertOk()->assertJsonFragment(['request_no' => 'WFH-2026-0001']);
         $this->patchJson("/api/admin/wfh-requests/{$id}/approve", [])->assertOk()->assertJsonPath('data.status', 'approved');
         Sanctum::actingAs($user);
-        $this->getJson('/api/employee/wfh-requests')->assertOk()->assertJsonPath('data.0.status', 'approved');
+        $this->getJson('/api/employee/wfh-requests')
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'approved')
+            ->assertJsonPath('data.0.counts.expected', 2);
+
+        // Employee attaches proof of work for 2026-11-09
+        Storage::fake('public');
+        $uploadResponse = $this->post("/api/employee/wfh-requests/{$id}/days", [
+            'date_attendance' => '2026-11-09',
+            'images' => [UploadedFile::fake()->image('proof.jpg', 400, 400)],
+        ]);
+        $uploadResponse->assertCreated()->assertJsonPath('data.days.0.status', 'submitted');
+        $trackerId = $uploadResponse->json('data.days.0.tracker_id');
+        $this->assertNotNull($trackerId);
+
+        // Admin verifies the submitted proof of work -> records attendance in time_logs
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/admin/wfh-trackers/{$trackerId}/accept", [
+            'remarks' => 'Verified output',
+        ])->assertOk()->assertJsonPath('data.days.0.status', 'accepted');
+
+        $timeLog = \App\Models\TimeLog::query()
+            ->where('employee_id', $employee->id)
+            ->whereDate('work_date', '2026-11-09')
+            ->first();
+        $this->assertNotNull($timeLog);
+        $this->assertSame('wfh', $timeLog->source);
+        $this->assertSame('complete', $timeLog->status);
+
+        // Dashboard WFH Time In & Time Out with Live Proof of Work Images on 2026-11-10
+        Sanctum::actingAs($user);
+        $this->getJson('/api/employee/wfh-requests/today?date=2026-11-10')
+            ->assertOk()
+            ->assertJsonPath('data.has_approved_wfh', true)
+            ->assertJsonPath('data.time_log', null);
+
+        // Time Out before Time In should fail
+        $this->post('/api/employee/wfh-requests/time-out', [
+            'date' => '2026-11-10',
+            'images' => [UploadedFile::fake()->image('live-proof.jpg', 400, 400)],
+        ], ['Accept' => 'application/json'])->assertUnprocessable();
+
+        // Time In succeeds
+        $this->postJson('/api/employee/wfh-requests/time-in', ['date' => '2026-11-10'])
+            ->assertOk()
+            ->assertJsonPath('data.has_approved_wfh', true)
+            ->assertJsonPath('data.time_log.source', 'wfh');
+
+        // Time Out with live proof of work image succeeds
+        $timeOutResp = $this->post('/api/employee/wfh-requests/time-out', [
+            'date' => '2026-11-10',
+            'images' => [UploadedFile::fake()->image('live-proof.jpg', 400, 400)],
+        ], ['Accept' => 'application/json']);
+        $timeOutResp->assertOk()
+            ->assertJsonPath('data.tracker.status', 'submitted');
+        $this->assertNotNull($timeOutResp->json('data.time_log.time_out'));
+
+        // Test schedule endpoint
+        Sanctum::actingAs($user);
+        $this->getJson('/api/employee/wfh-requests/schedule')->assertOk()->assertJsonStructure([
+            'success',
+            'data' => ['schedule_id', 'schedule_name', 'schedule_code', 'working_days', 'rest_days'],
+        ]);
     }
 
     public function test_authentication_and_employee_profile_are_required(): void
