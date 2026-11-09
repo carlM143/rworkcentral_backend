@@ -149,4 +149,9 @@ class Employee extends Model
         ])
         ->withTimestamps();
     }
+    public function attendanceScans(): HasMany
+    {
+        return $this->hasMany(AttendanceScan::class);
+    }
+
 }

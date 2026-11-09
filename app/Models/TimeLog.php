@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TimeLog extends Model
 {
@@ -81,4 +82,8 @@ class TimeLog extends Model
             'time_log_id'
         );
     } 
+    public function attendanceScans(): HasMany
+    {
+        return $this->hasMany(AttendanceScan::class);
+    }
 }
