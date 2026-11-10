@@ -40,14 +40,50 @@ class PayrollPeriodController extends Controller
         );
     }
 
-    private function rules(): array
+    private function rules(int $companyId, ?int $ignoreId = null): array
     {
         return [
             'period_name' => ['required', 'string', 'max:255'],
             'cutoff_number' => ['required', 'integer', 'in:1,2'],
+            'pay_period_start' => [
+                'required',
+                'date',
+                Rule::unique('payroll_periods', 'pay_period_start')
+                    ->where('company_id', $companyId)
+                    ->ignore($ignoreId),
+            ],
+            'pay_period_end' => ['required', 'date', 'after_or_equal:pay_period_start'],
             'cutoff_start' => ['required', 'date'],
             'cutoff_end' => ['required', 'date', 'after_or_equal:cutoff_start'],
             'payment_date' => ['required', 'date', 'after_or_equal:cutoff_end'],
+        ];
+    }
+
+    private function messages(): array
+    {
+        return [
+            'pay_period_start.unique' => 'A payroll period with this start date already exists.',
+            'pay_period_end.after_or_equal' => 'Payroll period end must be on or after its start.',
+            'cutoff_end.after_or_equal' => 'Cut-off end must be on or after the cut-off start.',
+            'payment_date.after_or_equal' => 'Payment date must be on or after the cut-off end.',
+        ];
+    }
+
+    private function format(PayrollPeriod $period): array
+    {
+        return [
+            'id' => $period->id,
+            'user_id' => $period->user_id,
+            'company_id' => $period->company_id,
+            'label' => $period->period_name ?? "Payroll Period #{$period->id}",
+            'period_name' => $period->period_name,
+            'cutoff_number' => (int) $period->cutoff_number,
+            'pay_period_start' => $period->pay_period_start?->format('Y-m-d'),
+            'pay_period_end' => $period->pay_period_end?->format('Y-m-d'),
+            'cutoff_start' => $period->cutoff_start?->format('Y-m-d'),
+            'cutoff_end' => $period->cutoff_end?->format('Y-m-d'),
+            'payment_date' => $period->payment_date?->format('Y-m-d'),
+            'status' => $period->status,
         ];
     }
 
@@ -56,20 +92,10 @@ class PayrollPeriodController extends Controller
     {
         $periods = PayrollPeriod::query()
             ->where('company_id', $this->companyId($request))
+            ->orderByDesc('pay_period_start')
             ->orderByDesc('id')
             ->get()
-            ->map(fn ($period) => [
-                'id' => $period->id,
-                'user_id' => $period->user_id,
-                'company_id' => $period->company_id,
-                'label' => $period->period_name ?? "Payroll Period #{$period->id}",
-                'period_name' => $period->period_name,
-                'cutoff_number' => (int) $period->cutoff_number,
-                'cutoff_start' => $period->cutoff_start?->format('Y-m-d'),
-                'cutoff_end' => $period->cutoff_end?->format('Y-m-d'),
-                'payment_date' => $period->payment_date?->format('Y-m-d'),
-                'status' => $period->status,
-            ]);
+            ->map(fn (PayrollPeriod $period) => $this->format($period));
 
         return response()->json([
             'success' => true,
@@ -81,19 +107,21 @@ class PayrollPeriodController extends Controller
     // POST /api/admin/payroll-periods
     public function store(Request $request): JsonResponse
     {
-        $data = $request->validate($this->rules());
+        $companyId = $this->companyId($request);
+
+        $data = $request->validate($this->rules($companyId), $this->messages());
 
         $payrollPeriod = PayrollPeriod::create([
             ...$data,
             'user_id' => $request->user()->id,
-            'company_id' => $this->companyId($request),
+            'company_id' => $companyId,
             'status' => 'draft',
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Payroll period created successfully.',
-            'data' => $payrollPeriod->fresh(),
+            'data' => $this->format($payrollPeriod->fresh()),
         ], 201);
     }
 
@@ -105,7 +133,7 @@ class PayrollPeriodController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Payroll period retrieved successfully.',
-            'data' => $payrollPeriod->load(['user', 'company']),
+            'data' => $this->format($payrollPeriod),
         ]);
     }
 
@@ -120,17 +148,19 @@ class PayrollPeriodController extends Controller
             ]);
         }
 
-        $data = $request->validate($this->rules());
+        $data = $request->validate(
+            $this->rules((int) $payrollPeriod->company_id, $payrollPeriod->id),
+            $this->messages()
+        );
 
         $payrollPeriod->update($data);
 
         return response()->json([
             'success' => true,
             'message' => 'Payroll period updated successfully.',
-            'data' => $payrollPeriod->fresh(),
+            'data' => $this->format($payrollPeriod->fresh()),
         ]);
     }
-    
 
     // PATCH /api/admin/payroll-periods/{payrollPeriod}/status
     public function updateStatus(Request $request, PayrollPeriod $payrollPeriod): JsonResponse
@@ -161,7 +191,7 @@ class PayrollPeriodController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Payroll period is now ' . $next . '.',
-            'data' => $payrollPeriod->fresh(),
+            'data' => $this->format($payrollPeriod->fresh()),
         ]);
     }
 

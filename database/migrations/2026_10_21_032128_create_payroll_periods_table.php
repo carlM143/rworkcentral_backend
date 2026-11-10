@@ -22,15 +22,22 @@ return new class extends Migration
             $table->unsignedTinyInteger('cutoff_number');
 
             $table->string('period_name');
+
+            // Salary period being paid, e.g. Oct 16–31
+            $table->date('pay_period_start');
+            $table->date('pay_period_end');
+
+            // Attendance days counted, e.g. Oct 8–22
             $table->date('cutoff_start');
             $table->date('cutoff_end');
+
             $table->date('payment_date');
 
             $table->enum('status', [
                 'draft',
                 'open',
                 'processing',
-                'completed',
+                'closed',
                 'cancelled',
             ])->default('draft');
 
@@ -40,6 +47,11 @@ return new class extends Migration
                 'company_id',
                 'cutoff_number',
             ], 'payroll_period_company_cutoff_idx');
+
+            $table->unique([
+                'company_id',
+                'pay_period_start',
+            ], 'payroll_period_company_pay_start_unique');
         });
     }
 

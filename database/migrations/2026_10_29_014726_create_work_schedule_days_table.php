@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('work_schedule_days', function (Blueprint $table) {
             $table->id();
             $table->foreignId('work_schedule_id')->constrained('work_schedules')->cascadeOnDelete();
-            $table->enum('day_of_week', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat', 'Sun']);
+            $table->enum('day_of_week', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
             $table->boolean('is_working_day')->default(true);
             $table->time('time_in')->nullable();
             $table->time('time_out')->nullable();

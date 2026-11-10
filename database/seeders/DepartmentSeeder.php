@@ -19,7 +19,7 @@ class DepartmentSeeder extends Seeder
 
         $departments = [
             ['name' => 'R Web Solutions', 'code' => 'RWS'],
-            ['name' => 'Technicians', 'code' => 'TECH'],
+            ['name' => 'Airpro', 'code' => 'AR'],
         ];
 
         foreach ($departments as $department) {
