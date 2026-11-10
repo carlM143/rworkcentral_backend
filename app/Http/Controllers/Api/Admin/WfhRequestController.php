@@ -62,7 +62,8 @@ class WfhRequestController extends Controller
     }
 
     /**
-     * Number of scheduled WFH days for an employee and date range.
+     * Number of scheduled WFH days for an employee and date range,
+     * checked against the employee's assigned work schedule.
      */
     public function preview(Request $request): JsonResponse
     {
@@ -73,12 +74,33 @@ class WfhRequestController extends Controller
         ]);
 
         $employee = $this->activeEmployee((int) $validated['employee_id']);
-        $days = $this->countDays($employee, $validated['start_date'], $validated['end_date']);
+        $draft = new WorkFromHome([
+            'start_date' => $validated['start_date'],
+            'end_date' => $validated['end_date'],
+        ]);
+        $draft->setRelation('employee', $employee);
+
+        $details = $this->schedule->scheduleBreakdown($draft);
+
+        if ($details['number_of_days'] === 0) {
+            throw ValidationException::withMessages([
+                'start_date' => 'The selected period has no scheduled working days for this employee.',
+            ]);
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'WFH days calculated.',
-            'data' => ['number_of_days' => $days],
+            'message' => 'WFH days calculated against employee schedule.',
+            'data' => [
+                'number_of_days' => $details['number_of_days'],
+                'calendar_days' => $details['calendar_days'],
+                'working_dates' => $details['working_dates'],
+                'breakdown' => $details['breakdown'],
+                'schedule_name' => $details['schedule_name'],
+                'schedule_code' => $details['schedule_code'],
+                'working_days' => $details['working_days'],
+                'rest_days' => $details['rest_days'],
+            ],
         ]);
     }
 
@@ -272,7 +294,7 @@ class WfhRequestController extends Controller
             'latestEmployment.department:id,department_name',
             'latestEmployment.position:id,position',
             'latestEmployment.workSchedule:id,schedule_code,schedule_name',
-            'latestEmployment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day',
+            'latestEmployment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day,time_in,time_out',
         ];
     }
 
@@ -290,6 +312,8 @@ class WfhRequestController extends Controller
 
     private function formatRequest(WorkFromHome $wfh): array
     {
+        $details = $this->schedule->scheduleBreakdown($wfh);
+
         return [
             'id' => $wfh->id,
             'request_no' => $wfh->request_no,
@@ -297,6 +321,13 @@ class WfhRequestController extends Controller
             'start_date' => $wfh->start_date?->toDateString(),
             'end_date' => $wfh->end_date?->toDateString(),
             'number_of_days' => $wfh->number_of_days,
+            'calendar_days' => $details['calendar_days'],
+            'working_dates' => $details['working_dates'],
+            'breakdown' => $details['breakdown'],
+            'schedule_name' => $details['schedule_name'],
+            'schedule_code' => $details['schedule_code'],
+            'working_days' => $details['working_days'],
+            'rest_days' => $details['rest_days'],
             'reason' => $wfh->reason,
             'supervisor_name' => $wfh->supervisor_name,
             'request_date' => $wfh->request_date?->toDateString(),
