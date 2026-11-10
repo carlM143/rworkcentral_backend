@@ -25,7 +25,7 @@ class WfhDocumentController extends Controller
     public function index(): JsonResponse
     {
         $records = WorkFromHome::query()
-            ->where('status', 'approved')
+            ->whereIn('status', ['approved', 'cancelled'])
             ->with($this->relations())
             ->latest('start_date')
             ->latest('id')
@@ -181,9 +181,46 @@ class WfhDocumentController extends Controller
         ]);
     }
 
+    /**
+     * Cancel an approved WFH request from Document Review without deleting records.
+     */
+    public function cancel(Request $request, WorkFromHome $workFromHome): JsonResponse
+    {
+        $requestNo = $workFromHome->request_no;
+
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $reason = $validated['reason'] ?? null;
+        $actor = $request->user()?->name ?? 'Admin';
+        $note = "Cancelled by {$actor}" . ($reason ? ": {$reason}" : '');
+
+        DB::transaction(function () use ($workFromHome, $note) {
+            $record = WorkFromHome::whereKey($workFromHome->id)->lockForUpdate()->firstOrFail();
+            if (! in_array($record->status, ['pending', 'approved'], true)) {
+                throw ValidationException::withMessages(['status' => 'Only pending or approved WFH requests can be cancelled.']);
+            }
+            $record->update([
+                'status' => 'cancelled',
+                'remarks' => $record->remarks ? $record->remarks . "\n" . $note : $note,
+            ]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => "Work From Home request {$requestNo} was cancelled successfully.",
+            'data' => $this->formatSummary($workFromHome->fresh($this->relations())),
+        ]);
+    }
+
     private function review(Request $request, WfhTracker $wfhTracker, string $status, ?string $remarks): WfhTracker
     {
         return DB::transaction(function () use ($request, $wfhTracker, $status, $remarks): WfhTracker {
+            $parent = WorkFromHome::whereKey($wfhTracker->work_from_home_id)->lockForUpdate()->firstOrFail();
+            if ($parent->status !== 'approved') {
+                throw ValidationException::withMessages(['status' => 'Only approved WFH requests can be reviewed.']);
+            }
             $record = WfhTracker::query()
                 ->lockForUpdate()
                 ->findOrFail($wfhTracker->id);
@@ -337,6 +374,12 @@ class WfhDocumentController extends Controller
         $days = collect($this->formatDays($wfh));
         $count = fn (string $status): int => $days->where('status', $status)->count();
 
+        $timeLogsCount = TimeLog::where('employee_id', $wfh->employee_id)
+            ->where('source', 'wfh')
+            ->where(fn ($q) => $q->where('remarks', 'like', "%{$wfh->request_no}%")
+                ->orWhere(fn ($dq) => $dq->whereDate('work_date', '>=', $wfh->start_date)->whereDate('work_date', '<=', $wfh->end_date)))
+            ->count();
+
         $counts = [
             'expected' => $days->count(),
             'not_submitted' => $count('not_submitted') + $count('draft'),
@@ -344,9 +387,13 @@ class WfhDocumentController extends Controller
             'accepted' => $count('accepted'),
             'returned' => $count('returned'),
             'attachments' => $days->sum(fn (array $day): int => count($day['images']) + ($day['document'] ? 1 : 0)),
+            'time_logs' => $timeLogsCount,
         ];
 
+        $hasData = ($counts['attachments'] > 0) || ($counts['submitted'] > 0) || ($counts['accepted'] > 0) || ($timeLogsCount > 0);
+
         $documentStatus = match (true) {
+            $wfh->status === 'cancelled' => 'cancelled',
             $counts['submitted'] > 0 => 'for_review',
             $counts['returned'] > 0 => 'returned',
             $counts['expected'] > 0 && $counts['accepted'] === $counts['expected'] => 'completed',
@@ -370,6 +417,7 @@ class WfhDocumentController extends Controller
             'has_schedule' => $this->schedule->hasSchedule($wfh),
             'document_status' => $documentStatus,
             'counts' => $counts,
+            'has_data' => $hasData,
         ];
     }
 

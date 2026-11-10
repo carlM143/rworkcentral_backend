@@ -53,12 +53,26 @@ class EmployeeWfhRequestTest extends TestCase
             ->assertJsonPath('data.0.status', 'approved')
             ->assertJsonPath('data.0.counts.expected', 2);
 
-        // Employee attaches proof of work for 2026-11-09
+        // Proof of Work cannot be attached directly before Time Out
         Storage::fake('public');
-        $uploadResponse = $this->post("/api/employee/wfh-requests/{$id}/days", [
+        $this->postJson("/api/employee/wfh-requests/{$id}/days", [
             'date_attendance' => '2026-11-09',
             'images' => [UploadedFile::fake()->image('proof.jpg', 400, 400)],
-        ]);
+        ])->assertUnprocessable()->assertJsonValidationErrors('date_attendance');
+
+        // Employee Time In, then Time Out with live Proof of Work for 2026-11-09
+        $this->postJson('/api/employee/wfh-requests/time-in', ['date' => '2026-11-09'])
+            ->assertOk()->assertJsonPath('data.has_approved_wfh', true);
+        $this->post('/api/employee/wfh-requests/time-out', [
+            'date' => '2026-11-09',
+            'images' => [UploadedFile::fake()->image('proof.jpg', 400, 400)],
+        ], ['Accept' => 'application/json'])->assertOk()->assertJsonPath('data.tracker.status', 'submitted');
+
+        // After Time Out the employee may update the proof for that day
+        $uploadResponse = $this->post("/api/employee/wfh-requests/{$id}/days", [
+            'date_attendance' => '2026-11-09',
+            'images' => [UploadedFile::fake()->image('proof2.jpg', 400, 400)],
+        ], ['Accept' => 'application/json']);
         $uploadResponse->assertCreated()->assertJsonPath('data.days.0.status', 'submitted');
         $trackerId = $uploadResponse->json('data.days.0.tracker_id');
         $this->assertNotNull($trackerId);
@@ -111,6 +125,42 @@ class EmployeeWfhRequestTest extends TestCase
             'success',
             'data' => ['schedule_id', 'schedule_name', 'schedule_code', 'working_days', 'rest_days'],
         ]);
+
+        // Admin can cancel an approved WFH request in Document Review without deleting records
+        $cancelRecord = \App\Models\WorkFromHome::create([
+            'employee_id' => $employee->id,
+            'request_no' => 'WFH-2026-0002',
+            'start_date' => '2026-11-12',
+            'end_date' => '2026-11-13',
+            'number_of_days' => 2,
+            'reason' => 'Second WFH',
+            'supervisor_name' => 'Supervisor',
+            'request_date' => now()->toDateString(),
+            'status' => 'approved',
+        ]);
+
+        $this->patchJson("/api/admin/wfh-documents/{$cancelRecord->id}/cancel", ['reason' => 'Schedule changed'])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        $this->assertDatabaseHas('work_from_home', [
+            'id' => $cancelRecord->id,
+            'status' => 'cancelled',
+        ]);
+
+        // Cancelled requests remain visible and deletion cannot remove proof or attendance.
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/admin/wfh-documents')->assertOk()->assertJsonFragment(['id' => $cancelRecord->id, 'document_status' => 'cancelled']);
+        $this->patchJson("/api/admin/wfh-documents/{$id}/cancel", [])->assertOk()->assertJsonPath('data.document_status', 'cancelled');
+        $submittedTracker = \App\Models\WfhTracker::where('work_from_home_id', $id)->where('status', 'submitted')->firstOrFail();
+        $this->patchJson("/api/admin/wfh-trackers/{$submittedTracker->id}/accept", [])->assertUnprocessable();
+        $this->patchJson("/api/admin/wfh-documents/{$id}/cancel", [])->assertUnprocessable();
+        $this->deleteJson("/api/admin/wfh-requests/{$id}")
+            ->assertStatus(405);
+
+        $this->assertDatabaseHas('work_from_home', ['id' => $id, 'status' => 'cancelled']);
+        $this->assertDatabaseHas('wfh_tracker', ['work_from_home_id' => $id]);
+        $this->assertDatabaseHas('time_logs', ['employee_id' => $employee->id, 'source' => 'wfh']);
     }
 
     public function test_authentication_and_employee_profile_are_required(): void

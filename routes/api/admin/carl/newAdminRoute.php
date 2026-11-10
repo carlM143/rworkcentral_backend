@@ -18,6 +18,7 @@ Route::get('wfh-requests', [WfhRequestController::class, 'index']);
 Route::post('wfh-requests', [WfhRequestController::class, 'store']);
 Route::patch('wfh-requests/{workFromHome}/approve', [WfhRequestController::class, 'approve']);
 Route::patch('wfh-requests/{workFromHome}/reject', [WfhRequestController::class, 'reject']);
+Route::delete('wfh-requests/{workFromHome}', [WfhRequestController::class, 'destroy']);
 
 // ============================================
 // WORK FROM HOME: DOCUMENT REVIEW
@@ -26,6 +27,7 @@ Route::patch('wfh-requests/{workFromHome}/reject', [WfhRequestController::class,
 Route::get('wfh-documents', [WfhDocumentController::class, 'index']);
 Route::get('wfh-documents/{workFromHome}', [WfhDocumentController::class, 'show']);
 Route::post('wfh-documents/{workFromHome}/days', [WfhDocumentController::class, 'attach']);
+Route::patch('wfh-documents/{workFromHome}/cancel', [WfhDocumentController::class, 'cancel']);
 Route::patch('wfh-trackers/{wfhTracker}/accept', [WfhDocumentController::class, 'accept']);
 Route::patch('wfh-trackers/{wfhTracker}/return', [WfhDocumentController::class, 'returnDay']);
 
