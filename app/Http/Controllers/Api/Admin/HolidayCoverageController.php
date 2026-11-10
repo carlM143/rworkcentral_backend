@@ -28,7 +28,7 @@ class HolidayCoverageController extends Controller
                     'status' => $employee->status,
                 ];
             });
-        return response()->json(['data' => ['holiday' => $holiday->load(['locations', 'coveredEmployees:id']), 'employees' => $employees]]);
+        return response()->json(['data' => ['holiday' => $holiday->load(['locations', 'coveredEmployees:id', 'holidayDates']), 'employees' => $employees]]);
     }
 
     public function update(Request $request, Holiday $holiday)
@@ -45,6 +45,6 @@ class HolidayCoverageController extends Controller
             $holiday->save();
             $holiday->coveredEmployees()->sync($data['employee_coverage'] === 'all' ? [] : $data['employee_ids']);
         });
-        return response()->json(['data' => $holiday->load(['locations', 'coveredEmployees:id'])]);
+        return response()->json(['data' => $holiday->load(['locations', 'coveredEmployees:id', 'holidayDates'])]);
     }
 }

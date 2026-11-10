@@ -60,6 +60,6 @@ class Holiday extends Model
 
     public function holidayDates()
     {
-        return $this->hasMany(HolidayDates::class);
+        return $this->hasMany(HolidayDates::class, 'holiday_id')->orderBy('holiday_date');
     }
 }

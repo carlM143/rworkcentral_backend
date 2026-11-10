@@ -167,4 +167,55 @@ class WorkCalendarTest extends TestCase
         $this->assertDatabaseMissing('holiday_employee_coverage', ['holiday_id' => $all->id]);
         $this->getJson('/api/admin/work-calendar/holidays?year=2026')->assertOk()->assertJsonFragment(['type_name' => 'Special Holiday'])->assertJsonFragment(['type_name' => 'Company Holiday']);
     }
+
+    public function test_calendar_saves_multiple_straight_holiday_dates(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+        $company = Company::create(['admin_id' => $user->id, 'company_name' => 'Example']);
+        $main = $company->locations()->create(['location_name' => 'Main', 'city' => 'Manila']);
+        $department = Department::create(['admin_id' => $user->id, 'company_id' => $company->id, 'department_name' => 'Operations', 'department_code' => 'OPS', 'status' => true]);
+        $position = Position::create(['department_id' => $department->id, 'position' => 'Staff', 'description' => 'Staff']);
+        $type = EmploymentType::create(['name' => 'Regular']);
+        $employee = Employee::create(['user_id' => $user->id, 'department_id' => $department->id, 'emp_id' => 11112222, 'firstname' => 'Multi', 'lastname' => 'Day', 'birthday' => '1990-01-01', 'status' => true]);
+        $employee->employments()->create(['employment_type_id' => $type->id, 'department_id' => $department->id, 'position_id' => $position->id, 'location_id' => $main->id, 'date_hired' => '2025-01-01']);
+
+        $payload = [
+            'holiday_name' => 'Year-End Break',
+            'holiday_date' => '2026-12-24',
+            'end_date' => '2026-12-26',
+            'holiday_type_id' => HolidayType::first()->id,
+            'is_working_day' => false,
+            'applies_to' => 'all_locations',
+            'location_ids' => [],
+        ];
+
+        $response = $this->postJson('/api/admin/work-calendar', $payload)
+            ->assertCreated()
+            ->assertJsonCount(3, 'data.holiday_dates');
+
+        $holidayId = $response->json('data.id');
+        $this->assertDatabaseHas('holiday_dates', ['holiday_id' => $holidayId, 'holiday_date' => '2026-12-24']);
+        $this->assertDatabaseHas('holiday_dates', ['holiday_id' => $holidayId, 'holiday_date' => '2026-12-25']);
+        $this->assertDatabaseHas('holiday_dates', ['holiday_id' => $holidayId, 'holiday_date' => '2026-12-26']);
+
+        // Querying mid-range should still return the multi-day holiday via holiday_dates
+        $this->getJson('/api/admin/work-calendar?start=2026-12-25&end=2026-12-26')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.holidays')
+            ->assertJsonCount(3, 'data.holidays.0.holiday_dates');
+
+        // Employee calendar should receive 3 holiday events for 2026-12-24..2026-12-26
+        $empEvents = $this->getJson('/api/employee/calendar?start=2026-12-01&end=2026-12-31')
+            ->assertOk()
+            ->json('data.events');
+
+        $holidayDatesInEmpCalendar = collect($empEvents)
+            ->where('category', 'holiday')
+            ->where('title', 'Year-End Break')
+            ->pluck('date')
+            ->all();
+
+        $this->assertSame(['2026-12-24', '2026-12-25', '2026-12-26'], $holidayDatesInEmpCalendar);
+    }
 }

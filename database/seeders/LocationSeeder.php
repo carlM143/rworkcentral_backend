@@ -20,7 +20,7 @@ class LocationSeeder extends Seeder
                 'city' => 'Manila',
             ],
             [
-                'location_name' => 'Elreo',
+                'location_name' => 'Elrio',
                 'city' => 'Davao',
             ],
         ];

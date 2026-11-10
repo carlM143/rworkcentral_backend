@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\CompanyCalendarEventController;
 use App\Http\Controllers\Api\Admin\CompanyController;
+use App\Http\Controllers\Api\Admin\ContributionChangeLogController;
 use App\Http\Controllers\Api\Admin\ContributionDeductionSettingController;
 use App\Http\Controllers\Api\Admin\ContributionRateBracketController;
 use App\Http\Controllers\Api\Admin\ContributionRateScheduleController;
@@ -257,6 +258,8 @@ Route::apiResource('contribution-types', ContributionTypeController::class);
 Route::apiResource('contribution-rate-schedules', ContributionRateScheduleController::class);
 Route::apiResource('contribution-rate-brackets', ContributionRateBracketController::class);
 Route::apiResource('contribution-deduction-settings', ContributionDeductionSettingController::class);
+Route::get('contribution-change-logs', [ContributionChangeLogController::class, 'index']);
+Route::get('contribution-change-logs/{contributionChangeLog}', [ContributionChangeLogController::class, 'show']);
 
 // ============================================
 // LOAN TYPES

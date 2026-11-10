@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ContributionChangeLog;
 use App\Models\ContributionDeductionSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +16,26 @@ class ContributionDeductionSettingController extends Controller
         'salaryType:id,type_name',
         'contributionType:id,contribution_code,contribution_name,provider',
     ];
+
+    private function snapshot(ContributionDeductionSetting $setting): array
+    {
+        return [
+            'company_id' => $setting->company_id,
+            'department_id' => $setting->department_id,
+            'salary_type_id' => $setting->salary_type_id,
+            'contribution_type_id' => $setting->contribution_type_id,
+            'deduction_schedule' => $setting->deduction_schedule,
+            'first_cutoff_percent' => $setting->first_cutoff_percent,
+            'second_cutoff_percent' => $setting->second_cutoff_percent,
+            'week_1_percent' => $setting->week_1_percent,
+            'week_2_percent' => $setting->week_2_percent,
+            'week_3_percent' => $setting->week_3_percent,
+            'week_4_percent' => $setting->week_4_percent,
+            'effective_from' => $setting->effective_from?->format('Y-m-d'),
+            'effective_to' => $setting->effective_to?->format('Y-m-d'),
+            'is_status' => (bool) $setting->is_status,
+        ];
+    }
 
     private function rules(): array
     {
@@ -47,6 +68,7 @@ class ContributionDeductionSettingController extends Controller
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
             'is_status' => ['nullable', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 
@@ -109,11 +131,24 @@ class ContributionDeductionSettingController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
 
         $setting = ContributionDeductionSetting::create([
             ...$validated,
             'deduction_schedule' => $this->resolveDeductionSchedule($validated),
             'is_status' => $validated['is_status'] ?? true,
+        ]);
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $setting->contribution_type_id,
+            'company_id' => $setting->company_id,
+            'entity_type' => 'deduction_setting',
+            'entity_id' => $setting->id,
+            'action' => 'created',
+            'old_values' => null,
+            'new_values' => $this->snapshot($setting),
+            'reason' => $reason ?? "Created deduction setting ({$setting->deduction_schedule}) effective {$setting->effective_from?->format('Y-m-d')}.",
         ]);
 
         return response()->json([
@@ -135,6 +170,10 @@ class ContributionDeductionSettingController extends Controller
     public function update(Request $request, ContributionDeductionSetting $contributionDeductionSetting): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
+
+        $oldValues = $this->snapshot($contributionDeductionSetting);
 
         $contributionDeductionSetting->update([
             ...$validated,
@@ -142,16 +181,57 @@ class ContributionDeductionSettingController extends Controller
             'is_status' => $validated['is_status'] ?? $contributionDeductionSetting->is_status,
         ]);
 
+        $fresh = $contributionDeductionSetting->fresh();
+        $newValues = $this->snapshot($fresh);
+
+        if ($oldValues['is_status'] === true && $newValues['is_status'] === false) {
+            $action = 'deactivated';
+            $defaultReason = "Deactivated deduction setting #{$fresh->id}.";
+        } elseif ($oldValues['effective_from'] !== $newValues['effective_from']) {
+            $action = 'versioned';
+            $defaultReason = "Updated deduction setting effective date from {$oldValues['effective_from']} to {$newValues['effective_from']}.";
+        } else {
+            $action = 'updated';
+            $defaultReason = "Updated deduction setting ({$fresh->deduction_schedule}).";
+        }
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $fresh->contribution_type_id,
+            'company_id' => $fresh->company_id,
+            'entity_type' => 'deduction_setting',
+            'entity_id' => $fresh->id,
+            'action' => $action,
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+            'reason' => $reason ?? $defaultReason,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Contribution deduction setting updated successfully.',
-            'data' => $contributionDeductionSetting->fresh()->load(self::RELATIONS),
+            'data' => $fresh->load(self::RELATIONS),
         ]);
     }
 
-    public function destroy(ContributionDeductionSetting $contributionDeductionSetting): JsonResponse
+    public function destroy(Request $request, ContributionDeductionSetting $contributionDeductionSetting): JsonResponse
     {
+        $oldValues = $this->snapshot($contributionDeductionSetting);
+        $settingId = $contributionDeductionSetting->id;
+        $typeId = $contributionDeductionSetting->contribution_type_id;
+        $companyId = $contributionDeductionSetting->company_id;
+
         $contributionDeductionSetting->delete();
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $typeId,
+            'company_id' => $companyId,
+            'entity_type' => 'deduction_setting',
+            'entity_id' => $settingId,
+            'action' => 'deleted',
+            'old_values' => $oldValues,
+            'new_values' => null,
+            'reason' => $request->input('reason') ?: "Deleted deduction setting #{$settingId} ({$oldValues['deduction_schedule']}).",
+        ]);
 
         return response()->json([
             'success' => true,

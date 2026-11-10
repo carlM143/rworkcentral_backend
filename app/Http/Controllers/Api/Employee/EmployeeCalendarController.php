@@ -28,8 +28,8 @@ class EmployeeCalendarController extends Controller
         $employment = $employee->employments()->with('location')->latest('id')->first();
         $companyId = $employee->department?->company_id;
         $locationId = $employment?->location_id;
-        $holidays = Holiday::with('holidayType')->where('company_id', $companyId)->where('status', true)
-            ->whereBetween('holiday_date', [$data['start'], $data['end']])
+        $holidays = Holiday::with(['holidayType', 'holidayDates'])->where('company_id', $companyId)->where('status', true)
+            ->where(fn ($q) => $q->whereBetween('holiday_date', [$data['start'], $data['end']])->orWhereHas('holidayDates', fn ($dq) => $dq->whereBetween('holiday_date', [$data['start'], $data['end']])))
             ->where(function ($query) use ($locationId) {
                 $query->where('applies_to', 'all_locations');
                 if ($locationId) {
@@ -40,13 +40,22 @@ class EmployeeCalendarController extends Controller
                 $query->where('employee_coverage', 'all')
                     ->orWhere(fn ($q) => $q->where('employee_coverage', 'only')->whereHas('coveredEmployees', fn ($q) => $q->where('employees.id', $employee->id)))
                     ->orWhere(fn ($q) => $q->where('employee_coverage', 'except')->whereDoesntHave('coveredEmployees', fn ($q) => $q->where('employees.id', $employee->id)));
-            })->get()->map(fn ($holiday) => [
-                'id' => 'holiday-'.$holiday->id,
-                'date' => $holiday->holiday_date->format('Y-m-d'),
-                'category' => 'holiday',
-                'title' => $holiday->holiday_name,
-                'detail' => ($holiday->holidayType?->type_name ?? 'Holiday').' · '.($holiday->is_working_day ? 'Working day' : 'Non-working day'),
-            ]);
+            })->get()->flatMap(function ($holiday) use ($data) {
+                $dates = $holiday->holidayDates->isNotEmpty()
+                    ? $holiday->holidayDates->pluck('holiday_date')->map(fn ($d) => $d->format('Y-m-d'))
+                    : collect([$holiday->holiday_date->format('Y-m-d')]);
+
+                return $dates
+                    ->filter(fn ($d) => $d >= $data['start'] && $d <= $data['end'])
+                    ->values()
+                    ->map(fn ($dateStr, $idx) => [
+                        'id' => $dates->count() > 1 ? 'holiday-'.$holiday->id.'-'.$dateStr : 'holiday-'.$holiday->id,
+                        'date' => $dateStr,
+                        'category' => 'holiday',
+                        'title' => $holiday->holiday_name,
+                        'detail' => ($holiday->holidayType?->type_name ?? 'Holiday').' · '.($holiday->is_working_day ? 'Working day' : 'Non-working day'),
+                    ]);
+            });
 
         $events = $employee->leaveRequests()->with(['leaveType', 'leaveDates' => fn ($q) => $q->whereBetween('leave_date', [$data['start'], $data['end']])])
             ->where('status', 'approved')->whereHas('leaveDates', fn ($q) => $q->whereBetween('leave_date', [$data['start'], $data['end']]))
