@@ -57,4 +57,9 @@ class Holiday extends Model
     {
         return $this->belongsToMany(Company::class, 'holiday_companies')->withTimestamps();
     }
+
+    public function holidayDates()
+    {
+        return $this->hasMany(HolidayDates::class);
+    }
 }
