@@ -11,6 +11,8 @@ class PayrollPeriod extends Model
         'company_id',
         'cutoff_number',
         'period_name',
+        'pay_period_start',
+        'pay_period_end',
         'cutoff_start',
         'cutoff_end',
         'payment_date',
@@ -21,6 +23,8 @@ class PayrollPeriod extends Model
     {
         return [
             'cutoff_number' => 'integer',
+            'pay_period_start' => 'date',
+            'pay_period_end' => 'date',
             'cutoff_start' => 'date',
             'cutoff_end' => 'date',
             'payment_date' => 'date',
@@ -36,7 +40,7 @@ class PayrollPeriod extends Model
     {
         return $this->belongsTo(Company::class);
     }
-    
+
     public function payrolls()
     {
         return $this->hasMany(Payroll::class);

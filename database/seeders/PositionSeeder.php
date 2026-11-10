@@ -25,7 +25,7 @@ class PositionSeeder extends Seeder
                 ['name' => 'Project Coordinator', 'description' => 'Coordinates project schedules, requirements, and client deliverables.'],
             ],
 
-            'TECH' => [
+            'AR' => [
                 ['name' => 'Technical Operations Manager', 'description' => 'Oversees technical operations, field assignments, and service quality.'],
                 ['name' => 'Lead Technician', 'description' => 'Leads technicians and handles complex installation and repair work.'],
                 ['name' => 'Field Technician', 'description' => 'Performs on-site installation, maintenance, and troubleshooting.'],

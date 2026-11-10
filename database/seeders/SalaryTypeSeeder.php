@@ -9,8 +9,8 @@ class SalaryTypeSeeder extends Seeder
 {
     public function run(): void
     {
-        foreach (['Monthly', 'Semi-Monthly', 'Weekly'] as $type) {
-            SalaryType::firstOrCreate(['type_name' => $type]);
+        foreach (['Monthly', 'Daily', 'Hourly'] as $type) {
+            SalaryType::updateOrCreate(['type_name' => $type]);
         }
     }
 }
