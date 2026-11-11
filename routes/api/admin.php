@@ -133,6 +133,7 @@ Route::patch('switch-rest-day-requests/{restDaySwitchRequest}/cancel', [RestDayS
 Route::get('work-calendar', [WorkCalendarController::class, 'index']);
 Route::post('work-calendar', [WorkCalendarController::class, 'store']);
 Route::get('work-calendar/holidays', [WorkCalendarController::class, 'holidays']);
+Route::post('work-calendar/holidays/import', [WorkCalendarController::class, 'import']);
 Route::get('work-calendar/holidays/{holiday}/coverage', [HolidayCoverageController::class, 'show']);
 Route::put('work-calendar/holidays/{holiday}/coverage', [HolidayCoverageController::class, 'update']);
 Route::put('work-calendar/{holiday}', [WorkCalendarController::class, 'update']);

@@ -217,4 +217,84 @@ class WorkCalendarController extends Controller
         $holiday->update(['status' => false]);
         return response()->json(['message' => 'Calendar entry removed.']);
     }
+
+    /**
+     * Bulk import a year's worth of holidays.
+     * Entries that already exist (same name and start date) are skipped.
+     */
+    public function import(Request $request)
+    {
+        $company = Company::firstOrFail();
+        $allowedTypes = HolidayType::where('status', true)
+            ->whereIn('type_code', ['REGULAR', 'SPECIAL', 'COMPANY', 'LOCAL'])
+            ->pluck('id', 'type_code');
+
+        $data = $request->validate([
+            'year' => ['required', 'integer', 'min:1900', 'max:9999'],
+            'applies_to' => ['required', Rule::in(['all_locations', 'specific_locations'])],
+            'location_ids' => ['required_if:applies_to,specific_locations', 'array'],
+            'location_ids.*' => ['integer', 'distinct', Rule::exists('locations', 'id')->where('company_id', $company->id)],
+            'holidays' => ['required', 'array', 'min:1', 'max:100'],
+            'holidays.*.holiday_name' => ['required', 'string', 'max:255'],
+            'holidays.*.holiday_date' => ['required', 'date_format:Y-m-d'],
+            'holidays.*.end_date' => ['nullable', 'date_format:Y-m-d'],
+            'holidays.*.holiday_type_id' => ['required', 'integer', Rule::in($allowedTypes->values()->all())],
+            'holidays.*.is_working_day' => ['required', 'boolean'],
+        ]);
+
+        $errors = [];
+        foreach ($data['holidays'] as $i => $item) {
+            $start = \Carbon\Carbon::parse($item['holiday_date']);
+            $end = \Carbon\Carbon::parse($item['end_date'] ?? $item['holiday_date']);
+            if ((int) $start->year !== (int) $data['year']) {
+                $errors["holidays.$i.holiday_date"] = "\"{$item['holiday_name']}\" is not within {$data['year']}.";
+            } elseif ($end->lt($start)) {
+                $errors["holidays.$i.end_date"] = "\"{$item['holiday_name']}\" end date is before its start date.";
+            } elseif ($start->diffInDays($end) > 62) {
+                $errors["holidays.$i.end_date"] = "\"{$item['holiday_name']}\" exceeds 62 days.";
+            }
+        }
+        if ($errors) {
+            throw \Illuminate\Validation\ValidationException::withMessages($errors);
+        }
+
+        $created = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($request, $company, $data, &$created, &$skipped) {
+            foreach ($data['holidays'] as $item) {
+                $exists = Holiday::where('company_id', $company->id)
+                    ->where('status', true)
+                    ->whereDate('holiday_date', $item['holiday_date'])
+                    ->whereRaw('LOWER(holiday_name) = ?', [mb_strtolower(trim($item['holiday_name']))])
+                    ->exists();
+
+                if ($exists) {
+                    $skipped[] = $item['holiday_name'];
+                    continue;
+                }
+
+                $holiday = Holiday::create([
+                    'company_id' => $company->id,
+                    'user_id' => $request->user()->id,
+                    'holiday_name' => trim($item['holiday_name']),
+                    'holiday_date' => $item['holiday_date'],
+                    'holiday_type_id' => $item['holiday_type_id'],
+                    'is_working_day' => $item['is_working_day'],
+                    'applies_to' => $data['applies_to'],
+                ]);
+                $holiday->locations()->sync($data['applies_to'] === 'specific_locations' ? $data['location_ids'] : []);
+
+                foreach (CarbonPeriod::create($item['holiday_date'], $item['end_date'] ?? $item['holiday_date']) as $date) {
+                    $holiday->holidayDates()->create(['holiday_date' => $date->format('Y-m-d')]);
+                }
+                $created++;
+            }
+        });
+
+        return response()->json([
+            'message' => "{$created} holiday(s) imported for {$data['year']}." . (count($skipped) ? ' ' . count($skipped) . ' already existed and were skipped.' : ''),
+            'data' => ['created' => $created, 'skipped' => $skipped],
+        ], 201);
+    }
 }
