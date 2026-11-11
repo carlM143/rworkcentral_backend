@@ -15,7 +15,7 @@ class AttendanceScheduleService
         $date = CarbonImmutable::parse($workDate)->startOfDay();
 
         $employment = Employment::query()
-            ->with('workSchedule')
+            ->with('workSchedule.days')
             ->where('employee_id', $employeeId)
             ->whereDate('date_hired', '<=', $date->toDateString())
             ->orderByDesc('date_hired')
@@ -28,16 +28,26 @@ class AttendanceScheduleService
 
         $schedule = $employment->workSchedule;
 
-        if (!$schedule->time_in || !$schedule->time_out) {
+        // Prefer the per-day schedule row (work_schedule_days) for this weekday,
+        // falling back to the schedule header times.
+        $dayPrefix = strtolower($date->format('D'));
+        $scheduleDay = $schedule->days?->first(
+            fn ($d) => strtolower(substr(trim((string) $d->day_of_week), 0, 3)) === $dayPrefix
+        );
+
+        $timeIn = $scheduleDay?->time_in ?: $schedule->time_in;
+        $timeOut = $scheduleDay?->time_out ?: $schedule->time_out;
+
+        if (!$timeIn || !$timeOut) {
             return null;
         }
 
         $scheduledIn = CarbonImmutable::parse(
-            $date->toDateString() . ' ' . $schedule->time_in
+            $date->toDateString() . ' ' . $timeIn
         );
 
         $scheduledOut = CarbonImmutable::parse(
-            $date->toDateString() . ' ' . $schedule->time_out
+            $date->toDateString() . ' ' . $timeOut
         );
 
         // Support overnight shifts.
