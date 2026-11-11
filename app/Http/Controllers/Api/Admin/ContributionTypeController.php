@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ContributionChangeLog;
 use App\Models\ContributionRateBracket;
 use App\Models\ContributionType;
 use Illuminate\Http\JsonResponse;
@@ -12,6 +13,15 @@ use Illuminate\Validation\Rule;
 
 class ContributionTypeController extends Controller
 {
+    private function snapshot(ContributionType $type): array
+    {
+        return [
+            'contribution_code' => $type->contribution_code,
+            'contribution_name' => $type->contribution_name,
+            'provider' => $type->provider,
+            'is_status' => (bool) $type->is_status,
+        ];
+    }
     public function index(Request $request): JsonResponse
     {
         $query = ContributionType::query();
@@ -46,6 +56,7 @@ class ContributionTypeController extends Controller
             'contribution_name' => ['required', 'string', 'max:150'],
             'provider' => ['required', 'string', 'max:150'],
             'is_status' => ['nullable', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
         $contributionType = ContributionType::create([
@@ -53,6 +64,16 @@ class ContributionTypeController extends Controller
             'contribution_name' => $validated['contribution_name'],
             'provider' => $validated['provider'],
             'is_status' => $validated['is_status'] ?? true,
+        ]);
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $contributionType->id,
+            'entity_type' => 'contribution_type',
+            'entity_id' => $contributionType->id,
+            'action' => 'created',
+            'old_values' => null,
+            'new_values' => $this->snapshot($contributionType),
+            'reason' => $validated['reason'] ?? "Created contribution type {$contributionType->contribution_code} — {$contributionType->contribution_name}.",
         ]);
 
         return response()->json([
@@ -83,7 +104,10 @@ class ContributionTypeController extends Controller
             'contribution_name' => ['required', 'string', 'max:150'],
             'provider' => ['required', 'string', 'max:150'],
             'is_status' => ['nullable', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ]);
+
+        $oldValues = $this->snapshot($contributionType);
 
         $contributionType->update([
             'contribution_code' => $validated['contribution_code'],
@@ -92,10 +116,28 @@ class ContributionTypeController extends Controller
             'is_status' => $validated['is_status'] ?? $contributionType->is_status,
         ]);
 
+        $fresh = $contributionType->fresh();
+        $newValues = $this->snapshot($fresh);
+        $action = ($oldValues['is_status'] === true && $newValues['is_status'] === false)
+            ? 'deactivated'
+            : 'updated';
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $fresh->id,
+            'entity_type' => 'contribution_type',
+            'entity_id' => $fresh->id,
+            'action' => $action,
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+            'reason' => $validated['reason'] ?? ($action === 'deactivated'
+                ? "Deactivated contribution type {$fresh->contribution_code}."
+                : "Updated contribution type {$fresh->contribution_code}."),
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Contribution type updated successfully.',
-            'data' => $contributionType->fresh(),
+            'data' => $fresh,
         ]);
     }
 
@@ -104,7 +146,13 @@ class ContributionTypeController extends Controller
         DB::transaction(function () use ($contributionType) {
             $scheduleIds = $contributionType->rateSchedules()->pluck('id');
 
+            $contributionType->changeLogs()->delete();
+
             if ($scheduleIds->isNotEmpty()) {
+                ContributionChangeLog::query()
+                    ->whereIn('contribution_rate_schedule_id', $scheduleIds)
+                    ->update(['contribution_rate_schedule_id' => null]);
+
                 ContributionRateBracket::query()
                     ->whereIn('contribution_rate_schedule_id', $scheduleIds)
                     ->delete();

@@ -4,12 +4,16 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Employee;
+use App\Models\TimeLog;
+use App\Models\WfhImage;
+use App\Models\WfhTracker;
 use App\Models\WorkFromHome;
 use App\Services\WfhScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -200,6 +204,14 @@ class WfhRequestController extends Controller
         ]);
     }
 
+    public function destroy(WorkFromHome $workFromHome): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'WFH requests cannot be deleted. Cancel the request to retain its history.',
+        ], 405);
+    }
+
     // =====================================================
     // HELPERS
     // =====================================================
@@ -314,6 +326,18 @@ class WfhRequestController extends Controller
     {
         $details = $this->schedule->scheduleBreakdown($wfh);
 
+        $attachmentsCount = WfhImage::whereHas('tracker', fn ($q) => $q->where('work_from_home_id', $wfh->id))->count()
+            + WfhTracker::where('work_from_home_id', $wfh->id)->whereNotNull('doc_path')->count();
+        $acceptedDays = WfhTracker::where('work_from_home_id', $wfh->id)->where('status', 'accepted')->count();
+        $submittedDays = WfhTracker::where('work_from_home_id', $wfh->id)->where('status', 'submitted')->count();
+        $timeLogsCount = TimeLog::where('employee_id', $wfh->employee_id)
+            ->where('source', 'wfh')
+            ->where(fn ($q) => $q->where('remarks', 'like', "%{$wfh->request_no}%")
+                ->orWhere(fn ($dq) => $dq->whereDate('work_date', '>=', $wfh->start_date)->whereDate('work_date', '<=', $wfh->end_date)))
+            ->count();
+
+        $hasData = ($attachmentsCount > 0) || ($submittedDays > 0) || ($acceptedDays > 0) || ($timeLogsCount > 0);
+
         return [
             'id' => $wfh->id,
             'request_no' => $wfh->request_no,
@@ -335,6 +359,13 @@ class WfhRequestController extends Controller
             'status' => $wfh->status,
             'approved_by' => $wfh->approvedBy?->name,
             'approved_at' => $wfh->approved_at?->toDateString(),
+            'counts' => [
+                'attachments' => $attachmentsCount,
+                'accepted' => $acceptedDays,
+                'submitted' => $submittedDays,
+                'time_logs' => $timeLogsCount,
+            ],
+            'has_data' => $hasData,
         ];
     }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ContributionChangeLog;
 use App\Models\ContributionRateBracket;
 use App\Models\ContributionRateSchedule;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +17,21 @@ class ContributionRateBracketController extends Controller
         'rateSchedule.contributionType:id,contribution_code,contribution_name,provider',
     ];
 
+    private function snapshot(ContributionRateBracket $bracket): array
+    {
+        return [
+            'contribution_rate_schedule_id' => $bracket->contribution_rate_schedule_id,
+            'salary_from' => $bracket->salary_from,
+            'salary_to' => $bracket->salary_to,
+            'monthly_salary_credit' => $bracket->monthly_salary_credit,
+            'employee_rate' => $bracket->employee_rate,
+            'employer_rate' => $bracket->employer_rate,
+            'employee_amount' => $bracket->employee_amount,
+            'employer_amount' => $bracket->employer_amount,
+            'employer_ec_amount' => $bracket->employer_ec_amount,
+        ];
+    }
+
     private function rules(): array
     {
         return [
@@ -28,6 +44,7 @@ class ContributionRateBracketController extends Controller
             'employee_amount' => ['nullable', 'numeric', 'min:0'],
             'employer_amount' => ['nullable', 'numeric', 'min:0'],
             'employer_ec_amount' => ['nullable', 'numeric', 'min:0'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 
@@ -86,9 +103,27 @@ class ContributionRateBracketController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
+
         $this->guardBracket($validated);
 
         $bracket = ContributionRateBracket::create($validated);
+        $schedule = ContributionRateSchedule::find($bracket->contribution_rate_schedule_id);
+
+        if ($schedule) {
+            $toLabel = $bracket->salary_to !== null ? "₱{$bracket->salary_to}" : 'And Above';
+            ContributionChangeLog::record([
+                'contribution_type_id' => $schedule->contribution_type_id,
+                'contribution_rate_schedule_id' => $schedule->id,
+                'entity_type' => 'rate_bracket',
+                'entity_id' => $bracket->id,
+                'action' => 'created',
+                'old_values' => null,
+                'new_values' => $this->snapshot($bracket),
+                'reason' => $reason ?? "Added salary bracket tier (₱{$bracket->salary_from} – {$toLabel}).",
+            ]);
+        }
 
         return response()->json([
             'success' => true,
@@ -109,20 +144,58 @@ class ContributionRateBracketController extends Controller
     public function update(Request $request, ContributionRateBracket $contributionRateBracket): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
+
         $this->guardBracket($validated, $contributionRateBracket->id);
 
+        $oldValues = $this->snapshot($contributionRateBracket);
         $contributionRateBracket->update($validated);
+        $fresh = $contributionRateBracket->fresh();
+        $schedule = ContributionRateSchedule::find($fresh->contribution_rate_schedule_id);
+
+        if ($schedule) {
+            $toLabel = $fresh->salary_to !== null ? "₱{$fresh->salary_to}" : 'And Above';
+            ContributionChangeLog::record([
+                'contribution_type_id' => $schedule->contribution_type_id,
+                'contribution_rate_schedule_id' => $schedule->id,
+                'entity_type' => 'rate_bracket',
+                'entity_id' => $fresh->id,
+                'action' => 'updated',
+                'old_values' => $oldValues,
+                'new_values' => $this->snapshot($fresh),
+                'reason' => $reason ?? "Updated salary bracket tier (₱{$fresh->salary_from} – {$toLabel}).",
+            ]);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Contribution rate bracket updated successfully.',
-            'data' => $contributionRateBracket->fresh()->load(self::RELATIONS),
+            'data' => $fresh->load(self::RELATIONS),
         ]);
     }
 
-    public function destroy(ContributionRateBracket $contributionRateBracket): JsonResponse
+    public function destroy(Request $request, ContributionRateBracket $contributionRateBracket): JsonResponse
     {
+        $oldValues = $this->snapshot($contributionRateBracket);
+        $bracketId = $contributionRateBracket->id;
+        $schedule = ContributionRateSchedule::find($contributionRateBracket->contribution_rate_schedule_id);
+
         $contributionRateBracket->delete();
+
+        if ($schedule) {
+            $toLabel = $oldValues['salary_to'] !== null ? "₱{$oldValues['salary_to']}" : 'And Above';
+            ContributionChangeLog::record([
+                'contribution_type_id' => $schedule->contribution_type_id,
+                'contribution_rate_schedule_id' => $schedule->id,
+                'entity_type' => 'rate_bracket',
+                'entity_id' => $bracketId,
+                'action' => 'deleted',
+                'old_values' => $oldValues,
+                'new_values' => null,
+                'reason' => $request->input('reason') ?: "Deleted salary bracket tier (₱{$oldValues['salary_from']} – {$toLabel}).",
+            ]);
+        }
 
         return response()->json([
             'success' => true,

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ContributionChangeLog;
 use App\Models\ContributionRateSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,25 @@ class ContributionRateScheduleController extends Controller
      * Allowed deduction frequencies for fixed contributions.
      */
     public const FREQUENCIES = ['monthly', 'semi_monthly', 'weekly', 'per_payroll'];
+
+    private function snapshot(ContributionRateSchedule $schedule): array
+    {
+        return [
+            'contribution_type_id' => $schedule->contribution_type_id,
+            'calculation_method' => $schedule->calculation_method,
+            'salary_basis' => $schedule->salary_basis,
+            'employee_rate' => $schedule->employee_rate,
+            'employer_rate' => $schedule->employer_rate,
+            'employee_amount' => $schedule->employee_amount,
+            'employer_amount' => $schedule->employer_amount,
+            'frequency' => $schedule->frequency,
+            'minimum_salary_base' => $schedule->minimum_salary_base,
+            'maximum_salary_base' => $schedule->maximum_salary_base,
+            'effective_from' => $schedule->effective_from?->format('Y-m-d'),
+            'effective_to' => $schedule->effective_to?->format('Y-m-d'),
+            'is_status' => (bool) $schedule->is_status,
+        ];
+    }
 
     /**
      * Validation rules shared by store and update.
@@ -52,6 +72,7 @@ class ContributionRateScheduleController extends Controller
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
             'is_status' => ['nullable', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 
@@ -116,10 +137,31 @@ class ContributionRateScheduleController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->sanitizeByMethod($request->validate($this->rules()));
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
+
+        $hasPriorSchedule = ContributionRateSchedule::query()
+            ->where('contribution_type_id', $validated['contribution_type_id'])
+            ->exists();
 
         $schedule = ContributionRateSchedule::create([
             ...$validated,
             'is_status' => $validated['is_status'] ?? true,
+        ]);
+
+        $action = $hasPriorSchedule ? 'versioned' : 'created';
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $schedule->contribution_type_id,
+            'contribution_rate_schedule_id' => $schedule->id,
+            'entity_type' => 'rate_schedule',
+            'entity_id' => $schedule->id,
+            'action' => $action,
+            'old_values' => null,
+            'new_values' => $this->snapshot($schedule),
+            'reason' => $reason ?? ($action === 'versioned'
+                ? "Created new rate schedule version ({$schedule->calculation_method}) effective {$schedule->effective_from?->format('Y-m-d')}."
+                : "Created initial rate schedule ({$schedule->calculation_method}) effective {$schedule->effective_from?->format('Y-m-d')}."),
         ]);
 
         return response()->json([
@@ -141,20 +183,49 @@ class ContributionRateScheduleController extends Controller
     public function update(Request $request, ContributionRateSchedule $contributionRateSchedule): JsonResponse
     {
         $validated = $this->sanitizeByMethod($request->validate($this->rules()));
+        $reason = $validated['reason'] ?? null;
+        unset($validated['reason']);
+
+        $oldValues = $this->snapshot($contributionRateSchedule);
 
         $contributionRateSchedule->update([
             ...$validated,
             'is_status' => $validated['is_status'] ?? $contributionRateSchedule->is_status,
         ]);
 
+        $fresh = $contributionRateSchedule->fresh();
+        $newValues = $this->snapshot($fresh);
+
+        if ($oldValues['is_status'] === true && $newValues['is_status'] === false) {
+            $action = 'deactivated';
+            $defaultReason = "Deactivated rate schedule #{$fresh->id}.";
+        } elseif ($oldValues['effective_from'] !== $newValues['effective_from']) {
+            $action = 'versioned';
+            $defaultReason = "Updated effective date from {$oldValues['effective_from']} to {$newValues['effective_from']}.";
+        } else {
+            $action = 'updated';
+            $defaultReason = "Updated rate schedule ({$fresh->calculation_method}) effective {$newValues['effective_from']}.";
+        }
+
+        ContributionChangeLog::record([
+            'contribution_type_id' => $fresh->contribution_type_id,
+            'contribution_rate_schedule_id' => $fresh->id,
+            'entity_type' => 'rate_schedule',
+            'entity_id' => $fresh->id,
+            'action' => $action,
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+            'reason' => $reason ?? $defaultReason,
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Contribution rate schedule updated successfully.',
-            'data' => $contributionRateSchedule->fresh()->load(self::RELATIONS),
+            'data' => $fresh->load(self::RELATIONS),
         ]);
     }
 
-    public function destroy(ContributionRateSchedule $contributionRateSchedule): JsonResponse
+    public function destroy(Request $request, ContributionRateSchedule $contributionRateSchedule): JsonResponse
     {
         if (
             $contributionRateSchedule->brackets()->exists() ||
@@ -166,7 +237,28 @@ class ContributionRateScheduleController extends Controller
             ], 409);
         }
 
-        $contributionRateSchedule->delete();
+        $oldValues = $this->snapshot($contributionRateSchedule);
+        $scheduleId = $contributionRateSchedule->id;
+        $typeId = $contributionRateSchedule->contribution_type_id;
+
+        DB::transaction(function () use ($contributionRateSchedule, $scheduleId, $typeId, $oldValues, $request) {
+            ContributionChangeLog::query()
+                ->where('contribution_rate_schedule_id', $scheduleId)
+                ->update(['contribution_rate_schedule_id' => null]);
+
+            $contributionRateSchedule->delete();
+
+            ContributionChangeLog::record([
+                'contribution_type_id' => $typeId,
+                'contribution_rate_schedule_id' => null,
+                'entity_type' => 'rate_schedule',
+                'entity_id' => $scheduleId,
+                'action' => 'deleted',
+                'old_values' => $oldValues,
+                'new_values' => null,
+                'reason' => $request->input('reason') ?: "Deleted rate schedule #{$scheduleId} ({$oldValues['calculation_method']}).",
+            ]);
+        });
 
         return response()->json([
             'success' => true,

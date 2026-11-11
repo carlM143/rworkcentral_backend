@@ -89,7 +89,35 @@ class EmployeeWfhRequestController extends Controller
             abort(403, 'You are not authorized to submit attachments for this WFH request.');
         }
 
+        // Proof of Work is attached on Time Out. Outside of the Time Out flow, the employee may
+        // only update/resubmit proof for a day they have already timed out.
+        $date = $request->input('date_attendance');
+        $timedOut = $date && TimeLog::query()
+            ->where('employee_id', $employee->id)
+            ->whereDate('work_date', $date)
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->exists();
+
+        if (! $timedOut) {
+            throw ValidationException::withMessages([
+                'date_attendance' => 'Proof of Work can only be attached when you Time Out from the Dashboard on your approved WFH day.',
+            ]);
+        }
+
         return $this->documents->attach($request, $workFromHome);
+    }
+
+    /**
+     * Current local date for attendance (the app stores timestamps in UTC, but WFH days are local calendar days).
+     */
+    private function localToday(Request $request): string
+    {
+        if ($request->filled('date')) {
+            return Carbon::parse($request->input('date'))->toDateString();
+        }
+
+        return Carbon::now(config('app.attendance_timezone', 'Asia/Manila'))->toDateString();
     }
 
     /**
@@ -98,9 +126,7 @@ class EmployeeWfhRequestController extends Controller
     public function today(Request $request): JsonResponse
     {
         $employee = $this->employee($request);
-        $targetDate = $request->filled('date')
-            ? Carbon::parse($request->input('date'))->toDateString()
-            : Carbon::today()->toDateString();
+        $targetDate = $this->localToday($request);
 
         return response()->json([
             'success' => true,
@@ -119,9 +145,7 @@ class EmployeeWfhRequestController extends Controller
             'employments.workSchedule.days',
         ]);
 
-        $today = $request->filled('date')
-            ? Carbon::parse($request->input('date'))->toDateString()
-            : Carbon::today()->toDateString();
+        $today = $this->localToday($request);
 
         $wfh = $this->findApprovedWfhForDate($employee, $today);
 
@@ -205,9 +229,7 @@ class EmployeeWfhRequestController extends Controller
             'employments.workSchedule.days',
         ]);
 
-        $today = $request->filled('date')
-            ? Carbon::parse($request->input('date'))->toDateString()
-            : Carbon::today()->toDateString();
+        $today = $this->localToday($request);
 
         $wfh = $this->findApprovedWfhForDate($employee, $today);
 
@@ -355,10 +377,36 @@ class EmployeeWfhRequestController extends Controller
             ];
         }
 
+        $upcoming = null;
+        if (! $wfh) {
+            $next = WorkFromHome::query()
+                ->where('employee_id', $employee->id)
+                ->where('status', 'approved')
+                ->whereDate('end_date', '>', $date)
+                ->orderBy('start_date')
+                ->get()
+                ->first(function (WorkFromHome $candidate) use ($employee, $date): bool {
+                    $candidate->setRelation('employee', $employee);
+                    return collect($this->schedule->workingDates($candidate))->contains(fn ($d) => $d > $date);
+                });
+
+            if ($next) {
+                $nextDate = collect($this->schedule->workingDates($next))->first(fn ($d) => $d > $date);
+                $upcoming = [
+                    'id' => $next->id,
+                    'request_no' => $next->request_no,
+                    'start_date' => $next->start_date?->toDateString(),
+                    'end_date' => $next->end_date?->toDateString(),
+                    'next_working_date' => $nextDate,
+                ];
+            }
+        }
+
         return [
             'has_approved_wfh' => $wfh !== null,
             'date' => $date,
             'wfh' => $wfhData,
+            'upcoming_wfh' => $upcoming,
             'time_log' => $timeLog ? [
                 'id' => $timeLog->id,
                 'work_date' => $timeLog->work_date?->toDateString(),

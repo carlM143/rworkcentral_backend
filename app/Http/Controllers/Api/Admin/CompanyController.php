@@ -130,7 +130,18 @@ class CompanyController extends Controller
 
         DB::transaction(function () use ($company, $validated) {
             $company->update(['company_name' => $validated['company_name'], 'status' => $validated['status'] ?? $company->status]);
-            $company->locations()->createMany($validated['locations'] ?? []);
+            foreach ($validated['locations'] ?? [] as $locData) {
+                $attributes = [
+                    'location_name' => $locData['location_name'],
+                    'city' => $locData['city'],
+                    'province' => $locData['province'] ?? null,
+                ];
+                if (! empty($locData['id'])) {
+                    $company->locations()->whereKey($locData['id'])->update($attributes);
+                } else {
+                    $company->locations()->create($attributes);
+                }
+            }
         });
 
         return response()->json([
@@ -164,9 +175,39 @@ class CompanyController extends Controller
 
     private function locationRules(bool $required = true): array
     {
+        $companyId = request()->route('company')?->id;
+
         return [
             'locations' => [$required ? 'required' : 'sometimes', 'array', ...($required ? ['min:1'] : [])],
-            'locations.*.location_name' => ['required', 'string', 'max:255', 'distinct', Rule::unique('locations', 'location_name')->where('company_id', request()->route('company')?->id)],
+            'locations.*.id' => [
+                'nullable',
+                'integer',
+                ...($companyId ? [Rule::exists('locations', 'id')->where('company_id', $companyId)] : []),
+            ],
+            'locations.*.location_name' => [
+                'required',
+                'string',
+                'max:255',
+                'distinct',
+                function (string $attribute, mixed $value, \Closure $fail) use ($companyId) {
+                    if (! $companyId) {
+                        return;
+                    }
+                    preg_match('/^locations\.(\d+)\.location_name$/', $attribute, $matches);
+                    $index = $matches[1] ?? null;
+                    $locationId = $index !== null ? request()->input("locations.{$index}.id") : null;
+
+                    $exists = \App\Models\Location::query()
+                        ->where('company_id', $companyId)
+                        ->where('location_name', $value)
+                        ->when($locationId, fn ($q) => $q->where('id', '!=', (int) $locationId))
+                        ->exists();
+
+                    if ($exists) {
+                        $fail('The location name has already been taken.');
+                    }
+                },
+            ],
             'locations.*.city' => ['required', 'string', 'max:255'],
             'locations.*.province' => ['nullable', 'string', 'max:255'],
         ];

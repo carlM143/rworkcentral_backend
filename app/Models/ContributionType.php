@@ -35,4 +35,9 @@ class ContributionType extends Model
     {
         return $this->hasMany(PayrollContribution::class);
     }
+
+    public function changeLogs(): HasMany
+    {
+        return $this->hasMany(ContributionChangeLog::class);
+    }
 }
