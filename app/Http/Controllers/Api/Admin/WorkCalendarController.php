@@ -27,8 +27,8 @@ class WorkCalendarController extends Controller
             'year' => ['required', 'integer', 'min:1900', 'max:9999'],
             'location_id' => ['nullable', 'integer', Rule::exists('locations', 'id')->where('company_id', $company->id)],
         ]);
-        $holidays = Holiday::with(['locations', 'holidayType', 'coveredEmployees:id'])->where('company_id', $company->id)->where('status', true)
-            ->whereYear('holiday_date', $data['year'])
+        $holidays = Holiday::with(['locations', 'holidayType', 'coveredEmployees:id', 'holidayDates'])->where('company_id', $company->id)->where('status', true)
+            ->where(fn ($q) => $q->whereYear('holiday_date', $data['year'])->orWhereHas('holidayDates', fn ($dq) => $dq->whereYear('holiday_date', $data['year'])))
             ->when($data['location_id'] ?? null, fn ($q, $location) => $q->where(fn ($q) => $q->where('applies_to', 'all_locations')->orWhereHas('locations', fn ($q) => $q->where('locations.id', $location))))
             ->orderBy('holiday_date')->orderBy('id')->get();
         return response()->json(['data' => ['holidays' => $holidays, 'locations' => $company->locations, 'types' => HolidayType::where('status', true)->whereIn('type_code', ['REGULAR', 'SPECIAL', 'COMPANY', 'LOCAL'])->get()]]);
@@ -46,8 +46,9 @@ class WorkCalendarController extends Controller
             throw \Illuminate\Validation\ValidationException::withMessages(['end' => 'Select a range of at most 62 days.']);
         }
         $location = $data['location_id'] ?? null;
-        $holidays = Holiday::with(['locations', 'holidayType'])->where('company_id', $company->id)
-            ->where('status', true)->whereBetween('holiday_date', [$data['start'], $data['end']])
+        $holidays = Holiday::with(['locations', 'holidayType', 'holidayDates'])->where('company_id', $company->id)
+            ->where('status', true)
+            ->where(fn ($q) => $q->whereBetween('holiday_date', [$data['start'], $data['end']])->orWhereHas('holidayDates', fn ($dq) => $dq->whereBetween('holiday_date', [$data['start'], $data['end']])))
             ->when($location, fn ($q) => $q->where(fn ($q) => $q->where('applies_to', 'all_locations')->orWhereHas('locations', fn ($q) => $q->where('locations.id', $location))))
             ->orderBy('holiday_date')->get();
         $leaves = LeaveRequest::with(['employee.employments.location', 'employee.department', 'leaveType', 'leaveDates' => fn ($q) => $q->whereBetween('leave_date', [$data['start'], $data['end']])])
@@ -182,21 +183,32 @@ class WorkCalendarController extends Controller
         $data = $request->validate([
             'holiday_name' => ['required', 'string', 'max:255'],
             'holiday_date' => ['required', 'date_format:Y-m-d'],
+            'end_date' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:holiday_date'],
             'holiday_type_id' => ['required', 'integer', Rule::exists('holiday_types', 'id')->where(fn ($q) => $q->where(fn ($q) => $q->where('status', true)->whereIn('type_code', ['REGULAR', 'SPECIAL', 'COMPANY', 'LOCAL']))->when($holiday->exists, fn ($q) => $q->orWhere('id', $holiday->holiday_type_id)))],
             'is_working_day' => ['required', 'boolean'],
             'applies_to' => ['required', Rule::in(['all_locations', 'specific_locations'])],
             'location_ids' => ['required_if:applies_to,specific_locations', 'array'],
             'location_ids.*' => ['integer', 'distinct', Rule::exists('locations', 'id')->where('company_id', $company->id)],
         ]);
+        $endDate = $data['end_date'] ?? $data['holiday_date'];
+        if (\Carbon\Carbon::parse($data['holiday_date'])->diffInDays($endDate) > 62) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['end_date' => 'Select a holiday range of at most 62 days.']);
+        }
         $created = ! $holiday->exists;
-        DB::transaction(function () use ($request, $holiday, $company, $data) {
-            $holiday->fill(collect($data)->except('location_ids')->all());
+        DB::transaction(function () use ($request, $holiday, $company, $data, $endDate) {
+            $holiday->fill(collect($data)->except(['location_ids', 'end_date'])->all());
             $holiday->company_id = $company->id;
             if (! $holiday->exists) $holiday->user_id = $request->user()->id;
             $holiday->save();
             $holiday->locations()->sync($data['applies_to'] === 'specific_locations' ? $data['location_ids'] : []);
+            $holiday->holidayDates()->delete();
+            foreach (CarbonPeriod::create($data['holiday_date'], $endDate) as $date) {
+                $holiday->holidayDates()->create([
+                    'holiday_date' => $date->format('Y-m-d'),
+                ]);
+            }
         });
-        return response()->json(['data' => $holiday->load(['locations', 'holidayType'])], $created ? 201 : 200);
+        return response()->json(['data' => $holiday->load(['locations', 'holidayType', 'holidayDates'])], $created ? 201 : 200);
     }
 
     public function destroy(Holiday $holiday)

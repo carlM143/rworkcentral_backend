@@ -7,10 +7,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class HolidayDates extends Model
 {
-     protected $fillable = [
+    protected $table = 'holiday_dates';
+
+    protected $fillable = [
         'holiday_id',
         'holiday_date',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'holiday_date' => 'date:Y-m-d',
+        ];
+    }
 
     public function holiday()
     {

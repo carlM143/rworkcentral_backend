@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Company;
+use App\Models\ContributionChangeLog;
 use App\Models\ContributionDeductionSetting;
 use App\Models\ContributionRateBracket;
 use App\Models\ContributionRateSchedule;
@@ -11,6 +12,7 @@ use App\Models\Department;
 use App\Models\SalaryType;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ContributionTypeSeeder extends Seeder
 {
@@ -56,6 +58,9 @@ class ContributionTypeSeeder extends Seeder
                 ->whereDoesntHave('payrollContributions')
                 ->get()
                 ->each(function (ContributionType $stale) {
+                    if (Schema::hasTable('contribution_change_logs')) {
+                        $stale->changeLogs()->delete();
+                    }
                     $scheduleIds = $stale->rateSchedules()->pluck('id');
                     if ($scheduleIds->isNotEmpty()) {
                         ContributionRateBracket::whereIn('contribution_rate_schedule_id', $scheduleIds)->delete();
@@ -73,6 +78,10 @@ class ContributionTypeSeeder extends Seeder
             foreach ([$sssType, $phicType, $hdmfType] as $cType) {
                 $existingSchedules = $cType->rateSchedules()->whereDoesntHave('payrollContributions')->get();
                 foreach ($existingSchedules as $sched) {
+                    if (Schema::hasTable('contribution_change_logs')) {
+                        ContributionChangeLog::where('contribution_rate_schedule_id', $sched->id)
+                            ->update(['contribution_rate_schedule_id' => null]);
+                    }
                     $sched->brackets()->delete();
                     $sched->delete();
                 }
@@ -345,6 +354,68 @@ class ContributionTypeSeeder extends Seeder
                         'effective_from' => '2026-01-01',
                         'effective_to' => null,
                         'is_status' => true,
+                    ]);
+                }
+            }
+
+            // Seed initial audit logs if contribution_change_logs exists and is empty
+            if (Schema::hasTable('contribution_change_logs') && ContributionChangeLog::count() === 0) {
+                foreach ([$sssType, $phicType, $hdmfType] as $cType) {
+                    ContributionChangeLog::record([
+                        'contribution_type_id' => $cType->id,
+                        'entity_type' => 'contribution_type',
+                        'entity_id' => $cType->id,
+                        'action' => 'created',
+                        'new_values' => [
+                            'contribution_code' => $cType->contribution_code,
+                            'contribution_name' => $cType->contribution_name,
+                            'provider' => $cType->provider,
+                            'is_status' => (bool) $cType->is_status,
+                        ],
+                        'reason' => "Statutory contribution type {$cType->contribution_code} initialized.",
+                    ]);
+                }
+
+                foreach (ContributionRateSchedule::withCount('brackets')->get() as $sched) {
+                    ContributionChangeLog::record([
+                        'contribution_type_id' => $sched->contribution_type_id,
+                        'contribution_rate_schedule_id' => $sched->id,
+                        'entity_type' => 'rate_schedule',
+                        'entity_id' => $sched->id,
+                        'action' => 'created',
+                        'new_values' => [
+                            'calculation_method' => $sched->calculation_method,
+                            'salary_basis' => $sched->salary_basis,
+                            'employee_rate' => $sched->employee_rate,
+                            'employer_rate' => $sched->employer_rate,
+                            'minimum_salary_base' => $sched->minimum_salary_base,
+                            'maximum_salary_base' => $sched->maximum_salary_base,
+                            'effective_from' => $sched->effective_from?->format('Y-m-d'),
+                            'brackets_count' => $sched->brackets_count,
+                            'is_status' => (bool) $sched->is_status,
+                        ],
+                        'reason' => "Initial {$sched->calculation_method} schedule effective {$sched->effective_from?->format('Y-m-d')}.",
+                    ]);
+                }
+
+                foreach (ContributionDeductionSetting::all() as $ds) {
+                    ContributionChangeLog::record([
+                        'contribution_type_id' => $ds->contribution_type_id,
+                        'company_id' => $ds->company_id,
+                        'entity_type' => 'deduction_setting',
+                        'entity_id' => $ds->id,
+                        'action' => 'created',
+                        'new_values' => [
+                            'company_id' => $ds->company_id,
+                            'department_id' => $ds->department_id,
+                            'salary_type_id' => $ds->salary_type_id,
+                            'deduction_schedule' => $ds->deduction_schedule,
+                            'first_cutoff_percent' => $ds->first_cutoff_percent,
+                            'second_cutoff_percent' => $ds->second_cutoff_percent,
+                            'effective_from' => $ds->effective_from?->format('Y-m-d'),
+                            'is_status' => (bool) $ds->is_status,
+                        ],
+                        'reason' => "Deduction schedule ({$ds->deduction_schedule}) configured.",
                     ]);
                 }
             }
