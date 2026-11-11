@@ -11,21 +11,9 @@ use Illuminate\Support\Facades\DB;
 
 class WorkScheduleDaySeeder extends Seeder
 {
-    private const SCHEDULE_CODES = ['WS-001', 'WS-002'];
-
     public function run(): void
     {
-        $days = [
-            ['day_of_week' => 'Monday', 'is_working_day' => true, 'time_in' => '08:00:00', 'time_out' => '16:00:00'],
-            ['day_of_week' => 'Tuesday', 'is_working_day' => true, 'time_in' => '08:00:00', 'time_out' => '16:00:00'],
-            ['day_of_week' => 'Wednesday', 'is_working_day' => true, 'time_in' => '09:00:00', 'time_out' => '17:00:00'],
-            ['day_of_week' => 'Thursday', 'is_working_day' => true, 'time_in' => '08:00:00', 'time_out' => '16:00:00'],
-            ['day_of_week' => 'Friday', 'is_working_day' => true, 'time_in' => '08:00:00', 'time_out' => '16:00:00'],
-            ['day_of_week' => 'Saturday', 'is_working_day' => true, 'time_in' => '08:00:00', 'time_out' => '12:00:00'],
-            ['day_of_week' => 'Sunday', 'is_working_day' => false, 'time_in' => null, 'time_out' => null],
-        ];
-
-        foreach (self::SCHEDULE_CODES as $code) {
+        foreach ($this->schedules() as $code => $days) {
             $schedule = WorkSchedule::where('schedule_code', $code)->firstOrFail();
 
             DB::transaction(function () use ($schedule, $days) {
@@ -33,6 +21,53 @@ class WorkScheduleDaySeeder extends Seeder
                 $this->seedInitialRevision($schedule, $days);
             });
         }
+    }
+
+    private function schedules(): array
+    {
+        return [
+            // R Web Solutions
+            'WS-001' => [
+                $this->day('Monday', '09:00:00', '18:00:00'),
+                $this->day('Tuesday', '08:00:00', '18:00:00'),
+                $this->day('Wednesday', '08:00:00', '18:00:00'),
+                $this->day('Thursday', '08:00:00', '18:00:00'),
+                $this->day('Friday', '08:00:00', '18:00:00'),
+                $this->day('Saturday', '08:00:00', '12:00:00'),
+                $this->restDay('Sunday'),
+            ],
+
+            // Airpro
+            'WS-002' => [
+                $this->day('Monday', '08:00:00', '17:00:00'),
+                $this->day('Tuesday', '08:00:00', '17:00:00'),
+                $this->day('Wednesday', '08:00:00', '17:00:00'),
+                $this->day('Thursday', '08:00:00', '17:00:00'),
+                $this->day('Friday', '08:00:00', '17:00:00'),
+                $this->day('Saturday', '08:00:00', '17:00:00'),
+                $this->restDay('Sunday'),
+            ],
+        ];
+    }
+
+    private function day(string $name, string $timeIn, string $timeOut): array
+    {
+        return [
+            'day_of_week' => $name,
+            'is_working_day' => true,
+            'time_in' => $timeIn,
+            'time_out' => $timeOut,
+        ];
+    }
+
+    private function restDay(string $name): array
+    {
+        return [
+            'day_of_week' => $name,
+            'is_working_day' => false,
+            'time_in' => null,
+            'time_out' => null,
+        ];
     }
 
     private function seedCurrentDays(WorkSchedule $schedule, array $days): void
