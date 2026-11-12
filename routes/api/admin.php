@@ -302,6 +302,7 @@ Route::prefix('payroll-groups')->group(function () {
     Route::post('/{payrollGroup}/assignments', [PayrollGroupController::class, 'assignEmployee']);
     Route::post('/{payrollGroup}/assignments/bulk', [PayrollGroupController::class, 'bulkAssign']);
     Route::patch('/{payrollGroup}/assignments/{assignment}/end', [PayrollGroupController::class, 'endAssignment']);
+    Route::delete('/{payrollGroup}/assignments/{assignment}', [PayrollGroupController::class, 'undoAssignment']);
 });
 
 // ============================================
