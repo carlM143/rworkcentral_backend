@@ -12,13 +12,13 @@ class EmployeeLifecycleMilestone extends Model
         'due_date',
         'status',
         'remarks',
+        'evaluation_document_id',
     ];
 
     protected function casts(): array
     {
         return [
             'due_date' => 'datetime',
-            'completed_at' => 'datetime',
         ];
     }
 
@@ -30,5 +30,10 @@ class EmployeeLifecycleMilestone extends Model
     public function lifecycleStage()
     {
         return $this->belongsTo(EmployeeLifecycleStage::class, 'lifecycle_stage_id');
+    }
+
+    public function evaluationDocument()
+    {
+        return $this->belongsTo(LifecycleEvaluationDocument::class);
     }
 }
