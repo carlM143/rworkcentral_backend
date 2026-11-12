@@ -218,4 +218,45 @@ class WorkCalendarTest extends TestCase
 
         $this->assertSame(['2026-12-24', '2026-12-25', '2026-12-26'], $holidayDatesInEmpCalendar);
     }
+
+    public function test_bulk_import_holidays_for_one_year_and_skips_duplicates(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+        $company = Company::create(['admin_id' => $user->id, 'company_name' => 'Example']);
+        $regularType = HolidayType::where('type_code', 'REGULAR')->first() ?? HolidayType::first();
+
+        $payload = [
+            'year' => 2026,
+            'applies_to' => 'all_locations',
+            'location_ids' => [],
+            'holidays' => [
+                [
+                    'holiday_name' => "New Year's Day",
+                    'holiday_date' => '2026-01-01',
+                    'end_date' => '2026-01-01',
+                    'holiday_type_id' => $regularType->id,
+                    'is_working_day' => false,
+                ],
+                [
+                    'holiday_name' => 'Year-End Break',
+                    'holiday_date' => '2026-12-28',
+                    'end_date' => '2026-12-29',
+                    'holiday_type_id' => $regularType->id,
+                    'is_working_day' => false,
+                ],
+            ],
+        ];
+
+        $this->postJson('/api/admin/work-calendar/holidays/import', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.created', 2)
+            ->assertJsonCount(0, 'data.skipped');
+
+        // Re-importing the same year skips existing records
+        $this->postJson('/api/admin/work-calendar/holidays/import', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.created', 0)
+            ->assertJsonCount(2, 'data.skipped');
+    }
 }
