@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\EvaluationTemplateCategoryController;
+use App\Http\Controllers\Api\Admin\EvaluationTemplateController;
 use App\Http\Controllers\Api\Admin\LifecycleConfigurationController;
 use App\Http\Controllers\Api\Admin\LifecycleEvaluationDocumentController;
 use App\Http\Controllers\Api\Admin\LifecycleWorkflowController;
@@ -32,3 +34,16 @@ Route::put('lifecycle/milestones/{milestone}', [LifecycleWorkflowController::cla
 Route::get('lifecycle/offboarding', [LifecycleWorkflowController::class, 'offboardings']);
 Route::post('lifecycle/offboarding', [LifecycleWorkflowController::class, 'saveOffboarding']);
 Route::put('lifecycle/offboarding/{offboarding}', [LifecycleWorkflowController::class, 'saveOffboarding']);
+
+// Evaluation Document Templates
+Route::get('evaluation-templates', [EvaluationTemplateController::class, 'index']);
+Route::post('evaluation-templates', [EvaluationTemplateController::class, 'store']);
+Route::put('evaluation-templates/{template}', [EvaluationTemplateController::class, 'update']);
+Route::get('evaluation-templates/{template}/download', [EvaluationTemplateController::class, 'download']);
+Route::delete('evaluation-templates/{template}', [EvaluationTemplateController::class, 'destroy']);
+
+// Evaluation Template Categories
+Route::get('evaluation-template-categories', [EvaluationTemplateCategoryController::class, 'index']);
+Route::post('evaluation-template-categories', [EvaluationTemplateCategoryController::class, 'store']);
+Route::put('evaluation-template-categories/{category}', [EvaluationTemplateCategoryController::class, 'update']);
+Route::delete('evaluation-template-categories/{category}', [EvaluationTemplateCategoryController::class, 'destroy']);
