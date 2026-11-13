@@ -29,11 +29,15 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index([
-                'company_id',
-                'contribution_type_id',
-                'effective_from',
-            ], 'contribution_deduction_effective_idx');
+            $table->unique(
+                ['company_id', 'contribution_type_id', 'effective_from'],
+                'contribution_deduction_unique'
+            );
+
+            $table->index(
+                ['company_id', 'contribution_type_id', 'effective_from'],
+                'contribution_deduction_effective_idx'
+            );
         });
     }
 

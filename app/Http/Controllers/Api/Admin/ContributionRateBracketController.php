@@ -144,8 +144,12 @@ class ContributionRateBracketController extends Controller
     public function update(Request $request, ContributionRateBracket $contributionRateBracket): JsonResponse
     {
         $validated = $request->validate($this->rules());
+        $validated['contribution_rate_schedule_id'] = $contributionRateBracket->contribution_rate_schedule_id;
+
         $reason = $validated['reason'] ?? null;
         unset($validated['reason']);
+
+        $validated = $this->syncAmounts($validated);
 
         $this->guardBracket($validated, $contributionRateBracket->id);
 
@@ -173,6 +177,25 @@ class ContributionRateBracketController extends Controller
             'message' => 'Contribution rate bracket updated successfully.',
             'data' => $fresh->load(self::RELATIONS),
         ]);
+    }
+
+    private function syncAmounts(array $validated): array
+    {
+        $msc = $validated['monthly_salary_credit'] ?? null;
+
+        foreach (['employee', 'employer'] as $side) {
+            $rate = $validated["{$side}_rate"] ?? null;
+
+            if ($rate === null) {
+                continue;
+            }
+
+            $validated["{$side}_amount"] = $msc !== null
+                ? round((float) $msc * (float) $rate / 100, 2)
+                : null;
+        }
+
+        return $validated;
     }
 
     public function destroy(Request $request, ContributionRateBracket $contributionRateBracket): JsonResponse

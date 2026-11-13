@@ -489,6 +489,36 @@ class EmployeeSeeder extends Seeder
                     'address' => 'Paco, Manila',
                 ],
             ],
+                        // DRIVER — Airpro
+            [
+                'emp_id' => 1011,
+                'firstname' => 'Ramon',
+                'middlename' => 'Delos Reyes',
+                'lastname' => 'Torres',
+                'suffix' => null,
+                'birthday' => '1988-05-19',
+                'gender' => 'Male',
+                'civil_status' => 'Married',
+                'employment_type' => 'Regular',
+                'department_code' => 'AR',
+                'position' => 'Driver',
+                'location' => 'Davao',
+                'hired_months_ago' => 18,
+                'mobile' => '09172468135',
+                'residential_address' => 'Panacan, Davao City',
+                'salary' => [
+                    'type' => 'Daily',
+                    'basic_salary' => 650,
+                    'bank_name' => 'Landbank',
+                    'account_number' => '5544332211',
+                ],
+                'contact_person' => [
+                    'name' => 'Luz Torres',
+                    'relationship' => 'Wife',
+                    'contact_number' => '09421234567',
+                    'address' => 'Panacan, Davao City',
+                ],
+            ],
         ];
     }
 }

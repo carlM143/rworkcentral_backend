@@ -99,8 +99,10 @@ class PayrollGenerationService
             ->whereDate('effective_from', '<=', $end)
             ->where(fn ($q) => $q->whereNull('effective_to')
                 ->orWhereDate('effective_to', '>=', $end))
+            ->orderByDesc('effective_from')
             ->get()
-            ->groupBy('contribution_type_id');
+            ->unique('contribution_type_id')
+            ->keyBy('contribution_type_id');
 
         $schedules = ContributionRateSchedule::query()
             ->where('is_status', true)
@@ -165,6 +167,21 @@ class PayrollGenerationService
                     continue;
                 }
 
+                if (
+                    blank($salary->bank_name)
+                    || blank($salary->account_name)
+                    || blank($salary->account_number)
+                ) {
+                    // Remove a leftover draft from an earlier generation, so it isn't finalized by mistake
+                    if ($current && $current->status === 'draft') {
+                        $current->contributions()->delete();
+                        $current->delete();
+                    }
+
+                    $skip('Bank details are incomplete.');
+                    continue;
+                }
+
                 $assignment = $assignments->get($employee->id);
                 $frequency = $assignment->payrollGroup?->frequency ?? 'semi_monthly';
                 $perMonth = self::PERIODS_PER_MONTH[$frequency] ?? 2;
@@ -217,8 +234,6 @@ class PayrollGenerationService
 
                 $contributions = $this->contributions(
                     $period,
-                    $employee,
-                    $salary,
                     $monthlyRate,
                     $contributionTypes,
                     $settings,
@@ -451,31 +466,27 @@ class PayrollGenerationService
             ->map(fn ($requests) => $requests->sum('days_in_cutoff'));
     }
 
-    private function contributions(
+        private function contributions(
         PayrollPeriod $period,
-        Employee $employee,
-        $salary,
         float $monthlyRate,
         Collection $types,
         Collection $settings,
         Collection $schedules
     ): array {
         $lines = [];
+        $cutoffNumber = (int) $period->cutoff_number;
 
         foreach ($types as $type) {
-            $setting = $settings->get($type->id, collect())
-                ->filter(fn ($s) => (!$s->department_id || (int) $s->department_id === (int) $employee->department_id)
-                    && (!$s->salary_type_id || (int) $s->salary_type_id === (int) $salary->salary_type_id))
-                ->sortByDesc(fn ($s) => ($s->department_id ? 2 : 0) + ($s->salary_type_id ? 1 : 0))
-                ->first();
+            /** @var ContributionDeductionSetting|null $setting */
+            $setting = $settings->get($type->id);
 
+            // No setting = this contribution is not deducted by payroll.
             if (!$setting) {
                 continue;
             }
 
-            $percent = (int) $period->cutoff_number === 1
-                ? (float) $setting->first_cutoff_percent
-                : (float) $setting->second_cutoff_percent;
+            // 1st cutoff period uses first_cutoff_percent, 2nd uses second_cutoff_percent.
+            $percent = $setting->percentForCutoff($cutoffNumber);
 
             if ($percent <= 0) {
                 continue;
