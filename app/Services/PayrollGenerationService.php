@@ -14,6 +14,7 @@ use App\Models\LeaveRequestDate;
 use App\Models\OvertimeRequest;
 use App\Models\Payroll;
 use App\Models\PayrollContribution;
+use App\Models\PayrollHolidayPay;
 use App\Models\PayrollPeriod;
 use App\Models\TimeLog;
 use Illuminate\Support\Collection;
@@ -32,6 +33,11 @@ class PayrollGenerationService
         'semi_monthly' => 2,
         'monthly' => 1,
     ];
+
+    public function __construct(
+        private readonly HolidayPayService $holidayPay
+    ) {
+    }
 
     public function generate(PayrollPeriod $period, ?int $groupId, ?int $userId): array
     {
@@ -120,6 +126,14 @@ class PayrollGenerationService
             ->get()
             ->keyBy('employee_id');
 
+        // Holidays, coverage, schedules and rules for this cut-off (loaded once)
+        $holidayContext = $this->holidayPay->prepare(
+            (int) $period->company_id,
+            $start,
+            $end,
+            $employeeIds
+        );
+
         $generated = [];
         $skipped = [];
 
@@ -136,6 +150,7 @@ class PayrollGenerationService
             $settings,
             $schedules,
             $existing,
+            $holidayContext,
             &$generated,
             &$skipped
         ) {
@@ -173,6 +188,7 @@ class PayrollGenerationService
                     || blank($salary->account_number)
                 ) {
                     // Remove a leftover draft from an earlier generation, so it isn't finalized by mistake
+                    // (its holiday pay rows are removed with it through the foreign key cascade)
                     if ($current && $current->status === 'draft') {
                         $current->contributions()->delete();
                         $current->delete();
@@ -222,14 +238,29 @@ class PayrollGenerationService
                 $undertimeDeduction = $deductsTime ? $undertimeMinutes * $minuteRate : 0;
                 $leaveDeduction = $rateType === 'monthly' ? $leaveDays * $dailyRate : 0;
 
-                $overtimeMinutes = (int) $overtime->get($employee->id, collect())
+                $employeeOvertime = $overtime->get($employee->id, collect());
+
+                $overtimeMinutes = (int) $employeeOvertime
                     ->sum(fn ($ot) => $ot->start_at && $ot->end_at
                         ? (int) abs($ot->start_at->diffInMinutes($ot->end_at))
                         : 0);
 
                 $overtimePay = $overtimeMinutes * $minuteRate * self::OVERTIME_MULTIPLIER;
 
-                $gross = max(0, $basicPay + $allowancePay + $overtimePay
+                // Holiday pay: only the premium on top of basic pay / regular overtime
+                $holidayLines = $this->holidayPay->linesFor(
+                    $holidayContext,
+                    $employee->id,
+                    $rateType,
+                    $dailyRate,
+                    $minuteRate,
+                    $logs,
+                    $employeeOvertime
+                );
+
+                $holidayPay = round(collect($holidayLines)->sum('amount'), 2);
+
+                $gross = max(0, $basicPay + $allowancePay + $overtimePay + $holidayPay
                     - $lateDeduction - $undertimeDeduction - $leaveDeduction);
 
                 $contributions = $this->contributions(
@@ -301,6 +332,7 @@ class PayrollGenerationService
                     'undertime_deduction' => round($undertimeDeduction, 2),
                     'unpaid_leave_days' => $leaveDays,
                     'unpaid_leave_deduction' => round($leaveDeduction, 2),
+                    'holiday_pay' => $holidayPay,
                     'gross_pay' => round($gross, 2),
                     'contributions_total' => round($contributionsTotal, 2),
                     'loan_deductions_total' => round($loanTotal, 2),
@@ -313,6 +345,7 @@ class PayrollGenerationService
                         'monthly_rate' => round($monthlyRate, 2),
                         'minute_rate' => round($minuteRate, 4),
                         'loans' => $loanLines,
+                        'holidays' => $holidayLines,
                     ],
                     'generated_by' => $userId,
                     'generated_at' => now(),
@@ -332,6 +365,26 @@ class PayrollGenerationService
                         'employer_share' => $line['employer_share'],
                         'employer_ec_amount' => $line['employer_ec_amount'],
                         'reference_key' => "P{$payroll->id}-C{$line['contribution_type_id']}",
+                    ]);
+                }
+
+                // Rebuild holiday pay lines on every (re)generation
+                $payroll->holidayPays()->delete();
+
+                foreach ($holidayLines as $line) {
+                    PayrollHolidayPay::create([
+                        'payroll_id' => $payroll->id,
+                        'employee_id' => $employee->id,
+                        'holiday_id' => $line['holiday_id'],
+                        'holiday_pay_rule_id' => $line['holiday_pay_rule_id'],
+                        'time_log_id' => $line['time_log_id'],
+                        'holiday_date' => $line['holiday_date'],
+                        'scenario' => $line['scenario'],
+                        'worked_minutes' => $line['worked_minutes'],
+                        'overtime_minutes' => $line['overtime_minutes'],
+                        'daily_rate' => $line['daily_rate'],
+                        'rate_percent' => $line['rate_percent'],
+                        'amount' => $line['amount'],
                     ]);
                 }
 
@@ -466,7 +519,7 @@ class PayrollGenerationService
             ->map(fn ($requests) => $requests->sum('days_in_cutoff'));
     }
 
-        private function contributions(
+    private function contributions(
         PayrollPeriod $period,
         float $monthlyRate,
         Collection $types,

@@ -10,8 +10,9 @@ class HolidayType extends Model
         'type_code',
         'type_name',
         'user_id',
-        'holiday_type_name',
+        'type_name',
         'description',
+        'requires_prior_day_present',
         'status',
     ];
 
@@ -30,5 +31,9 @@ class HolidayType extends Model
     public function holidays()
     {
         return $this->hasMany(Holiday::class);
+    }
+    public function payRules(): HasMany
+    {
+        return $this->hasMany(HolidayPayRule::class);
     }
 }

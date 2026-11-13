@@ -32,6 +32,7 @@ class Payroll extends Model
         'undertime_deduction',
         'unpaid_leave_days',
         'unpaid_leave_deduction',
+        'holiday_pay',
         'gross_pay',
         'contributions_total',
         'loan_deductions_total',
@@ -107,5 +108,10 @@ class Payroll extends Model
     public function contributions(): HasMany
     {
         return $this->hasMany(PayrollContribution::class);
+    }
+
+    public function holidayPays(): HasMany
+    {
+        return $this->hasMany(PayrollHolidayPay::class);
     }
 }

@@ -62,4 +62,10 @@ class Holiday extends Model
     {
         return $this->hasMany(HolidayDates::class, 'holiday_id')->orderBy('holiday_date');
     }
+
+
+public function payrollHolidayPays(): HasMany
+{
+    return $this->hasMany(PayrollHolidayPay::class);
+}
 }

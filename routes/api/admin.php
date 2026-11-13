@@ -47,6 +47,10 @@ use App\Http\Controllers\Api\Admin\QrCodeGenerationController;
 
 use App\Http\Controllers\Api\Admin\PayslipController;
 use App\Http\Controllers\Api\Admin\EmployeePayrollController;
+
+use App\Http\Controllers\Api\Admin\HolidayPayController;
+use App\Http\Controllers\Api\Admin\HolidayPayRuleController;
+
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -341,3 +345,9 @@ Route::get('payslips', [PayslipController::class, 'index']);
 Route::get('payslips/{payroll}', [PayslipController::class, 'show']);
 
 Route::get('employee-payrolls', [EmployeePayrollController::class, 'index']);
+
+
+//holidays 
+Route::get('holiday-pay-rules/types', [HolidayPayRuleController::class, 'types']);
+Route::apiResource('holiday-pay-rules', HolidayPayRuleController::class);
+Route::get('holiday-pays', [HolidayPayController::class, 'index']);
