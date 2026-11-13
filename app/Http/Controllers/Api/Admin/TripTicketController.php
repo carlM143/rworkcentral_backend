@@ -46,24 +46,77 @@ class TripTicketController extends Controller
 
     /**
      * GET /admin/trip-tickets
+     *   ?page=&per_page=&search=&status=&driver_id=&department_id=&date_from=&date_to=
+     * Paginated list plus today's stats and the filter dropdown options.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $lastOdometer = $this->schedule->lastOdometerByVehicle();
+        $validated = $request->validate([
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:scheduled,ongoing,completed,cancelled'],
+            'driver_id' => ['nullable', 'integer'],
+            'department_id' => ['nullable', 'integer'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date'],
+        ]);
 
-        $tickets = TripTicket::query()
+        $search = trim((string) ($validated['search'] ?? ''));
+
+        $query = TripTicket::query()
             ->with($this->relations())
+            ->when($validated['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($validated['driver_id'] ?? null, fn ($q, $id) => $q->where('driver_id', $id))
+            ->when($validated['department_id'] ?? null, fn ($q, $id) => $q->where('requesting_department_id', $id))
+            ->when($validated['date_from'] ?? null, fn ($q, $date) => $q->whereDate('trip_date', '>=', $date))
+            ->when($validated['date_to'] ?? null, fn ($q, $date) => $q->whereDate('trip_date', '<=', $date))
+            ->when($search !== '', function ($q) use ($search) {
+                $like = '%'.$search.'%';
+                $name = fn ($e) => $e->where('firstname', 'like', $like)->orWhere('lastname', 'like', $like);
+
+                $q->where(function ($w) use ($like, $name) {
+                    $w->where('ticket_no', 'like', $like)
+                        ->orWhere('destination', 'like', $like)
+                        ->orWhere('purpose', 'like', $like)
+                        ->orWhereHas('vehicle', fn ($v) => $v->where('plate_no', 'like', $like))
+                        ->orWhereHas('driver.employment.employee', $name)
+                        ->orWhereHas('requester', $name)
+                        ->orWhereHas('passengers', $name);
+                });
+            })
             ->orderByDesc('trip_date')
             ->orderByDesc('scheduled_departure')
-            ->get()
-            ->map(fn (TripTicket $ticket): array => $this->format($ticket, $lastOdometer))
-            ->values();
+            ->orderByDesc('id');
+
+        $page = $query->paginate((int) ($validated['per_page'] ?? 10));
+        $lastOdometer = $this->schedule->lastOdometerByVehicle();
 
         return response()->json([
             'success' => true,
             'message' => 'Trip tickets retrieved.',
-            'data' => $tickets,
+            'data' => collect($page->items())
+                ->map(fn (TripTicket $ticket): array => $this->format($ticket, $lastOdometer))
+                ->values(),
+            'meta' => [
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+                'per_page' => $page->perPage(),
+                'total' => $page->total(),
+                'from' => $page->firstItem() ?? 0,
+                'to' => $page->lastItem() ?? 0,
+            ],
+            'stats' => $this->todayStats(),
+            'filters' => $this->filterOptions(),
         ]);
+    }
+
+    /**
+     * GET /admin/trip-tickets/{tripTicket}
+     */
+    public function show(TripTicket $tripTicket): JsonResponse
+    {
+        return $this->respond($tripTicket, 'Trip ticket retrieved.');
     }
 
     // =====================================================
@@ -140,6 +193,7 @@ class TripTicketController extends Controller
             'start' => ['required', 'date_format:H:i'],
             'end' => ['required', 'date_format:H:i', 'after:start'],
             'department_id' => ['nullable', 'integer', 'exists:departments,id'],
+            'exclude_ticket_id' => ['nullable', 'integer'],
         ]);
 
         return response()->json([
@@ -150,6 +204,7 @@ class TripTicketController extends Controller
                 $validated['start'],
                 $validated['end'],
                 isset($validated['department_id']) ? (int) $validated['department_id'] : null,
+                isset($validated['exclude_ticket_id']) ? (int) $validated['exclude_ticket_id'] : null,
             ),
         ]);
     }
@@ -163,72 +218,11 @@ class TripTicketController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'requesting_department_id' => ['required', 'integer', 'exists:departments,id'],
-            'requested_by' => ['required', 'integer', 'exists:employees,id'],
-            'trip_date' => ['required', 'date', 'after_or_equal:today'],
-            'scheduled_departure' => ['required', 'date_format:H:i'],
-            'expected_return' => ['required', 'date_format:H:i', 'after:scheduled_departure'],
-            'driver_id' => ['required', 'integer', 'exists:drivers_info,id'],
-            'vehicle_id' => ['required', 'integer', 'exists:vehicles,id'],
-            'destination' => ['required', 'string', 'max:255'],
-            'purpose' => ['required', 'string', 'max:255'],
-            'passenger_ids' => ['nullable', 'array'],
-            'passenger_ids.*' => ['integer', 'distinct', 'exists:employees,id'],
-            'remarks' => ['nullable', 'string', 'max:1000'],
-        ], [
-            'trip_date.after_or_equal' => 'The trip date cannot be in the past.',
-            'expected_return.after' => 'Expected return must be after the departure time.',
-        ]);
-
+        $validated = $this->validateTicket($request);
         $passengerIds = array_values(array_unique($validated['passenger_ids'] ?? []));
 
         $ticket = DB::transaction(function () use ($request, $validated, $passengerIds): TripTicket {
-            // Requester must belong to the requesting department.
-            $requester = Employee::query()->with('latestEmployment')->find($validated['requested_by']);
-            if ((int) $requester?->latestEmployment?->department_id !== (int) $validated['requesting_department_id']) {
-                throw ValidationException::withMessages([
-                    'requested_by' => 'The requester must belong to the requesting department.',
-                ]);
-            }
-
-            // Lock existing tickets of the day so two people cannot double-book.
-            TripTicket::query()->whereDate('trip_date', $validated['trip_date'])->lockForUpdate()->get(['id']);
-
-            $options = $this->buildOptions(
-                Carbon::parse($validated['trip_date']),
-                $validated['scheduled_departure'],
-                $validated['expected_return'],
-                (int) $validated['requesting_department_id'],
-            );
-
-            $driver = collect($options['drivers'])->firstWhere('id', (int) $validated['driver_id']);
-            if (! $driver || ! $driver['available']) {
-                throw ValidationException::withMessages([
-                    'driver_id' => 'Driver is not available: '.($driver['reason'] ?? 'not found').'.',
-                ]);
-            }
-
-            $vehicle = collect($options['vehicles'])->firstWhere('id', (int) $validated['vehicle_id']);
-            if (! $vehicle || ! $vehicle['available']) {
-                throw ValidationException::withMessages([
-                    'vehicle_id' => 'Vehicle is not available: '.($vehicle['reason'] ?? 'not found').'.',
-                ]);
-            }
-
-            if (count($passengerIds) > $vehicle['capacity']) {
-                throw ValidationException::withMessages([
-                    'passenger_ids' => "{$vehicle['plate_no']} can carry up to {$vehicle['capacity']} passenger(s).",
-                ]);
-            }
-
-            $busyPassenger = collect($options['passengers'])
-                ->first(fn (array $p) => in_array($p['id'], $passengerIds, true) && ! $p['available']);
-            if ($busyPassenger) {
-                throw ValidationException::withMessages([
-                    'passenger_ids' => "{$busyPassenger['name']} is already {$busyPassenger['reason']}.",
-                ]);
-            }
+            $this->assertBookable($validated, $passengerIds);
 
             $ticket = TripTicket::create([
                 'ticket_no' => $this->nextTicketNo($validated['trip_date']),
@@ -252,6 +246,47 @@ class TripTicketController extends Controller
         });
 
         return $this->respond($ticket, "Trip ticket {$ticket->ticket_no} created.", 201);
+    }
+
+    /**
+     * PUT /admin/trip-tickets/{tripTicket}
+     * Edit a ticket that has not departed yet.
+     */
+    public function update(Request $request, TripTicket $tripTicket): JsonResponse
+    {
+        $validated = $this->validateTicket($request);
+        $passengerIds = array_values(array_unique($validated['passenger_ids'] ?? []));
+
+        $ticket = DB::transaction(function () use ($tripTicket, $validated, $passengerIds): TripTicket {
+            $ticket = TripTicket::query()->lockForUpdate()->findOrFail($tripTicket->id);
+
+            if ($ticket->status !== 'scheduled') {
+                throw ValidationException::withMessages([
+                    'status' => 'Only scheduled trips can be edited.',
+                ]);
+            }
+
+            $this->assertBookable($validated, $passengerIds, $ticket->id);
+
+            $ticket->update([
+                'requesting_department_id' => $validated['requesting_department_id'],
+                'requested_by' => $validated['requested_by'],
+                'trip_date' => $validated['trip_date'],
+                'scheduled_departure' => $validated['scheduled_departure'],
+                'expected_return' => $validated['expected_return'],
+                'driver_id' => $validated['driver_id'],
+                'vehicle_id' => $validated['vehicle_id'],
+                'destination' => trim($validated['destination']),
+                'purpose' => trim($validated['purpose']),
+                'remarks' => isset($validated['remarks']) ? trim($validated['remarks']) ?: null : null,
+            ]);
+
+            $ticket->passengers()->sync($passengerIds);
+
+            return $ticket;
+        });
+
+        return $this->respond($ticket, "Trip ticket {$ticket->ticket_no} updated.");
     }
 
     // =====================================================
@@ -382,9 +417,9 @@ class TripTicketController extends Controller
     /**
      * @return array{drivers: array, vehicles: array, passengers: array}
      */
-    private function buildOptions(Carbon $date, string $start, string $end, ?int $departmentId): array
+    private function buildOptions(Carbon $date, string $start, string $end, ?int $departmentId, ?int $excludeId = null): array
     {
-        $busy = $this->schedule->overlapping($date->toDateString(), $start, $end);
+        $busy = $this->schedule->overlapping($date->toDateString(), $start, $end, $excludeId);
         $window = Carbon::createFromFormat('H:i', $start)->format('g:i A').'–'.Carbon::createFromFormat('H:i', $end)->format('g:i A');
 
         // Drivers
@@ -399,7 +434,7 @@ class TripTicketController extends Controller
                 'employment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day',
             ])
             ->get()
-            ->filter(fn (DriverInfo $d) => (bool) $d->employment?->employee?->status)
+            ->filter(fn (DriverInfo $d) => ($d->status ?? 'active') === 'active' && (bool) $d->employment?->employee?->status)
             ->map(function (DriverInfo $d) use ($date, $onLeave, $tripsByDriver, $busy, $window, $departmentId): array {
                 $base = [
                     'id' => $d->id,
@@ -480,6 +515,119 @@ class TripTicketController extends Controller
             ->all();
 
         return ['drivers' => $drivers, 'vehicles' => $vehicles, 'passengers' => $passengers];
+    }
+
+    private function validateTicket(Request $request): array
+    {
+        return $request->validate([
+            'requesting_department_id' => ['required', 'integer', 'exists:departments,id'],
+            'requested_by' => ['required', 'integer', 'exists:employees,id'],
+            'trip_date' => ['required', 'date', 'after_or_equal:today'],
+            'scheduled_departure' => ['required', 'date_format:H:i'],
+            'expected_return' => ['required', 'date_format:H:i', 'after:scheduled_departure'],
+            'driver_id' => ['required', 'integer', 'exists:drivers_info,id'],
+            'vehicle_id' => ['required', 'integer', 'exists:vehicles,id'],
+            'destination' => ['required', 'string', 'max:255'],
+            'purpose' => ['required', 'string', 'max:255'],
+            'passenger_ids' => ['nullable', 'array'],
+            'passenger_ids.*' => ['integer', 'distinct', 'exists:employees,id'],
+            'remarks' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'trip_date.after_or_equal' => 'The trip date cannot be in the past.',
+            'expected_return.after' => 'Expected return must be after the departure time.',
+        ]);
+    }
+
+    /**
+     * Requester, driver, vehicle and passengers must all be free for the
+     * window. $excludeId ignores the ticket being edited.
+     *
+     * @param  array<int, int>  $passengerIds
+     */
+    private function assertBookable(array $validated, array $passengerIds, ?int $excludeId = null): void
+    {
+        $requester = Employee::query()->with('latestEmployment')->find($validated['requested_by']);
+        if ((int) $requester?->latestEmployment?->department_id !== (int) $validated['requesting_department_id']) {
+            throw ValidationException::withMessages([
+                'requested_by' => 'The requester must belong to the requesting department.',
+            ]);
+        }
+
+        // Lock the day's tickets so two people cannot double-book.
+        TripTicket::query()->whereDate('trip_date', $validated['trip_date'])->lockForUpdate()->get(['id']);
+
+        $options = $this->buildOptions(
+            Carbon::parse($validated['trip_date']),
+            $validated['scheduled_departure'],
+            $validated['expected_return'],
+            (int) $validated['requesting_department_id'],
+            $excludeId,
+        );
+
+        $driver = collect($options['drivers'])->firstWhere('id', (int) $validated['driver_id']);
+        if (! $driver || ! $driver['available']) {
+            throw ValidationException::withMessages([
+                'driver_id' => 'Driver is not available: '.($driver['reason'] ?? 'not found or inactive').'.',
+            ]);
+        }
+
+        $vehicle = collect($options['vehicles'])->firstWhere('id', (int) $validated['vehicle_id']);
+        if (! $vehicle || ! $vehicle['available']) {
+            throw ValidationException::withMessages([
+                'vehicle_id' => 'Vehicle is not available: '.($vehicle['reason'] ?? 'not found or inactive').'.',
+            ]);
+        }
+
+        if (count($passengerIds) > $vehicle['capacity']) {
+            throw ValidationException::withMessages([
+                'passenger_ids' => "{$vehicle['plate_no']} can carry up to {$vehicle['capacity']} passenger(s).",
+            ]);
+        }
+
+        $busyPassenger = collect($options['passengers'])
+            ->first(fn (array $p) => in_array($p['id'], $passengerIds, true) && ! $p['available']);
+        if ($busyPassenger) {
+            throw ValidationException::withMessages([
+                'passenger_ids' => "{$busyPassenger['name']} is already {$busyPassenger['reason']}.",
+            ]);
+        }
+    }
+
+    private function todayStats(): array
+    {
+        $today = TripTicket::query()
+            ->whereDate('trip_date', now()->toDateString())
+            ->where('status', '!=', 'cancelled')
+            ->get(['status', 'odometer_out', 'odometer_in']);
+
+        return [
+            'trips_today' => $today->count(),
+            'ongoing' => TripTicket::query()->where('status', 'ongoing')->count(),
+            'completed_today' => $today->where('status', 'completed')->count(),
+            'km_today' => (int) $today
+                ->filter(fn ($t) => $t->odometer_in !== null && $t->odometer_out !== null)
+                ->sum(fn ($t) => $t->odometer_in - $t->odometer_out),
+        ];
+    }
+
+    private function filterOptions(): array
+    {
+        $drivers = DriverInfo::query()
+            ->whereIn('id', TripTicket::query()->select('driver_id')->distinct())
+            ->with('employment.employee:id,firstname,middlename,lastname,suffix')
+            ->get()
+            ->map(fn (DriverInfo $d): array => ['id' => $d->id, 'name' => $this->fullName($d->employment?->employee)])
+            ->sortBy('name')
+            ->values();
+
+        $departments = Department::query()
+            ->whereIn('id', TripTicket::query()->select('requesting_department_id')->distinct())
+            ->orderBy('department_name')
+            ->get(['id', 'department_name'])
+            ->map(fn (Department $d): array => ['id' => $d->id, 'name' => $d->department_name])
+            ->values();
+
+        return ['drivers' => $drivers, 'departments' => $departments];
     }
 
     private function nextTicketNo(string $tripDate): string

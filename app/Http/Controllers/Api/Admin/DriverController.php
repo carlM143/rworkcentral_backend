@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\DriverInfo;
 use App\Models\Employee;
+use App\Models\TripTicket;
 use App\Services\DriverAvailabilityService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -15,6 +16,13 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
+/**
+ * Drivers (drivers_info).
+ *
+ * An employee becomes eligible as a driver when the position of their
+ * current employment contains the word "Driver" (e.g. "Driver" under
+ * Operations or Marketing). HR then registers the license details here.
+ */
 class DriverController extends Controller
 {
     public function __construct(private readonly DriverAvailabilityService $availability)
@@ -189,6 +197,104 @@ class DriverController extends Controller
         ]);
     }
 
+    /**
+     * POST /admin/drivers/{driverInfo}  (multipart, used for edits because
+     * PHP does not parse file uploads on PUT/PATCH requests)
+     * Renew or correct the license, change the driver code or photo.
+     */
+    public function update(Request $request, DriverInfo $driverInfo): JsonResponse
+    {
+        $validated = $request->validate([
+            'drivers_code' => ['required', 'string', 'max:50', 'unique:drivers_info,drivers_code,'.$driverInfo->id],
+            'licence_no' => ['required', 'string', 'max:50', 'unique:drivers_info,licence_no,'.$driverInfo->id],
+            'expire_date' => ['required', 'date'],
+            'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
+            'remove_image' => ['nullable', 'boolean'],
+        ], [
+            'licence_no.unique' => 'This license number is already registered.',
+            'drivers_code.unique' => 'This driver code is already used.',
+        ]);
+
+        $oldImage = $driverInfo->image_path;
+        $newImage = null;
+
+        try {
+            if ($request->hasFile('image')) {
+                $newImage = $request->file('image')->store("drivers/{$driverInfo->id}", 'public');
+            }
+
+            $imagePath = $newImage
+                ?? ($request->boolean('remove_image') ? null : $oldImage);
+
+            $driverInfo->update([
+                'drivers_code' => strtoupper(trim($validated['drivers_code'])),
+                'licence_no' => strtoupper(trim($validated['licence_no'])),
+                'expire_date' => $validated['expire_date'],
+                'image_path' => $imagePath,
+            ]);
+        } catch (Throwable $exception) {
+            if ($newImage) {
+                Storage::disk('public')->delete($newImage);
+            }
+
+            throw $exception;
+        }
+
+        // Remove the replaced or removed photo only after the save succeeded.
+        if ($oldImage && $oldImage !== $driverInfo->image_path) {
+            Storage::disk('public')->delete($oldImage);
+        }
+
+        return $this->respond($driverInfo, 'Driver updated successfully.');
+    }
+
+    /**
+     * PATCH /admin/drivers/{driverInfo}/deactivate
+     * Keeps the driver and their trip history, but hides them from new
+     * trip tickets. Blocked while they still have upcoming trips.
+     */
+    public function deactivate(DriverInfo $driverInfo): JsonResponse
+    {
+        if ($driverInfo->status === 'inactive') {
+            return $this->respond($driverInfo, 'Driver is already inactive.');
+        }
+
+        $pending = TripTicket::query()
+            ->where('driver_id', $driverInfo->id)
+            ->whereIn('status', ['scheduled', 'ongoing'])
+            ->whereDate('trip_date', '>=', now()->toDateString())
+            ->orderBy('trip_date')
+            ->pluck('ticket_no');
+
+        if ($pending->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'status' => 'Reassign or cancel the driver\'s upcoming trips first: '.$pending->implode(', ').'.',
+            ]);
+        }
+
+        $driverInfo->update(['status' => 'inactive']);
+
+        return $this->respond($driverInfo, 'Driver deactivated.');
+    }
+
+    /**
+     * PATCH /admin/drivers/{driverInfo}/activate
+     */
+    public function activate(DriverInfo $driverInfo): JsonResponse
+    {
+        $driverInfo->loadMissing('employment.employee:id,status');
+
+        if (! $driverInfo->employment?->employee?->status) {
+            throw ValidationException::withMessages([
+                'status' => 'The employee record is inactive. Reactivate the employee first.',
+            ]);
+        }
+
+        $driverInfo->update(['status' => 'active']);
+
+        return $this->respond($driverInfo, 'Driver activated.');
+    }
+
     // =====================================================
     // HELPERS
     // =====================================================
@@ -206,6 +312,23 @@ class DriverController extends Controller
             'employment.workSchedule:id,schedule_code,schedule_name',
             'employment.workSchedule.days:id,work_schedule_id,day_of_week,is_working_day',
         ];
+    }
+
+    private function respond(DriverInfo $driver, string $message): JsonResponse
+    {
+        $date = now();
+        $driver->load($this->relations());
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => $this->format(
+                $driver,
+                $date,
+                $this->availability->employeesOnLeave($date),
+                $this->availability->tripsByDriver($date),
+            ),
+        ]);
     }
 
     private function generateCode(): string
@@ -234,6 +357,7 @@ class DriverController extends Controller
             'licence_no' => $driver->licence_no,
             'expire_date' => $driver->expire_date?->toDateString(),
             'image_path' => $driver->image_path ? Storage::disk('public')->url($driver->image_path) : null,
+            'status' => $driver->status ?? 'active',
             'employee' => [
                 'id' => $employee?->id,
                 'emp_id' => (string) ($employee?->emp_id ?? ''),
