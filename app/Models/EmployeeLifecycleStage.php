@@ -13,12 +13,14 @@ class EmployeeLifecycleStage extends Model
         'months_after_hire',
         'sort_order',
         'status',
+        'requires_attachment',
     ];
 
     protected function casts(): array
     {
         return [
             'status' => 'boolean',
+            'requires_attachment' => 'boolean',
         ];
     }
 

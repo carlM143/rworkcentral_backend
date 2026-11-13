@@ -40,8 +40,6 @@ class DatabaseSeeder extends Seeder
 
             EmployeeSeeder::class,
 
-            EmployeeLoanSeeder::class,
-
             TimeLogSeeder::class,
         ]);
     }
