@@ -16,6 +16,7 @@ class DriverInfo extends Model
         'drivers_code',
         'expire_date',
         'image_path',
+        'status',
     ];
 
     protected function casts(): array

@@ -8,6 +8,17 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Computes whether a driver can be assigned on a given date.
+ *
+ * Rules (checked in order):
+ *   0. Driver deactivated by HR        -> inactive
+ *   1. License expired on that date   -> license_expired
+ *   2. Approved leave on that date     -> on_leave
+ *   3. Rest day in the work schedule   -> rest_day
+ *   4. Departed and not back yet       -> on_trip (today only)
+ *   5. Otherwise                       -> available (with busy blocks)
+ */
 class DriverAvailabilityService
 {
     private const DAY_MAP = [
@@ -78,6 +89,10 @@ class DriverAvailabilityService
         })->values();
 
         $publicBusy = $busy->map(fn (array $b) => collect($b)->except('_window_end')->all())->all();
+
+        if (($driver->status ?? 'active') === 'inactive') {
+            return $this->result('inactive', 'Driver deactivated', $publicBusy);
+        }
 
         if ($driver->expire_date && $driver->expire_date->lt($date->copy()->startOfDay())) {
             return $this->result('license_expired', 'License expired '.$driver->expire_date->toDateString(), $publicBusy);
