@@ -647,4 +647,90 @@ class PayrollGroupController extends Controller
             ]),
         ]);
     }
+
+    // UNDO A MISTAKEN ASSIGNMENT: deletes it and reopens the employee's previous group
+    // DELETE /api/admin/payroll-groups/{payrollGroup}/assignments/{assignment}
+    public function undoAssignment(
+        PayrollGroup $payrollGroup,
+        EmployeePayrollGroupAssignment $assignment
+    ): JsonResponse {
+        $restored = DB::transaction(function () use (
+            $payrollGroup,
+            $assignment
+        ) {
+            Employee::query()
+                ->lockForUpdate()
+                ->findOrFail($assignment->employee_id);
+
+            $item = EmployeePayrollGroupAssignment::query()
+                ->where('payroll_group_id', $payrollGroup->id)
+                ->lockForUpdate()
+                ->findOrFail($assignment->id);
+
+            $from = $item->effective_from->format('Y-m-d');
+            $to = $item->effective_to?->format('Y-m-d');
+
+            // Only the latest assignment can be undone, so history stays consistent
+            $hasLater = EmployeePayrollGroupAssignment::query()
+                ->where('employee_id', $item->employee_id)
+                ->where('id', '!=', $item->id)
+                ->whereDate('effective_from', '>', $from)
+                ->exists();
+
+            if ($hasLater) {
+                throw ValidationException::withMessages([
+                    'assignment' => [
+                        'A later group assignment exists for this employee. Undo that one first.',
+                    ],
+                ]);
+            }
+
+            // Payroll already generated under this assignment: keep it, end it instead
+            $usedInPayroll = DB::table('payrolls')
+                ->join('payroll_periods', 'payroll_periods.id', '=', 'payrolls.payroll_period_id')
+                ->where('payrolls.employee_id', $item->employee_id)
+                ->where('payrolls.payroll_group_id', $item->payroll_group_id)
+                ->whereDate('payroll_periods.cutoff_end', '>=', $from)
+                ->when($to, fn ($q) => $q->whereDate('payroll_periods.cutoff_start', '<=', $to))
+                ->exists();
+
+            if ($usedInPayroll) {
+                throw ValidationException::withMessages([
+                    'assignment' => [
+                        'Payroll has already been generated under this assignment. End the assignment instead.',
+                    ],
+                ]);
+            }
+
+            // The assignment that was closed when this one was created
+            $previous = EmployeePayrollGroupAssignment::query()
+                ->where('employee_id', $item->employee_id)
+                ->where('id', '!=', $item->id)
+                ->whereDate(
+                    'effective_to',
+                    Carbon::parse($from)->subDay()->toDateString()
+                )
+                ->lockForUpdate()
+                ->first();
+
+            $item->delete();
+
+            $previous?->update(['effective_to' => $to]);
+
+            return $previous;
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => $restored
+                ? 'Assignment undone. The employee was returned to their previous payroll group.'
+                : 'Assignment undone. The employee has no payroll group assignment now.',
+            'data' => [
+                'restored_assignment' => $restored?->fresh([
+                    'employee',
+                    'payrollGroup',
+                ]),
+            ],
+        ]);
+    }
 }

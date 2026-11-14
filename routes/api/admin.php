@@ -44,6 +44,13 @@ use App\Http\Controllers\Api\Admin\WfhRequestController;
 use App\Http\Controllers\Api\Admin\WorkCalendarController;
 use App\Http\Controllers\Api\Admin\GenerateQrCodeController;
 use App\Http\Controllers\Api\Admin\QrCodeGenerationController;
+
+use App\Http\Controllers\Api\Admin\PayslipController;
+use App\Http\Controllers\Api\Admin\EmployeePayrollController;
+
+use App\Http\Controllers\Api\Admin\HolidayPayController;
+use App\Http\Controllers\Api\Admin\HolidayPayRuleController;
+
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -303,6 +310,7 @@ Route::prefix('payroll-groups')->group(function () {
     Route::post('/{payrollGroup}/assignments', [PayrollGroupController::class, 'assignEmployee']);
     Route::post('/{payrollGroup}/assignments/bulk', [PayrollGroupController::class, 'bulkAssign']);
     Route::patch('/{payrollGroup}/assignments/{assignment}/end', [PayrollGroupController::class, 'endAssignment']);
+    Route::delete('/{payrollGroup}/assignments/{assignment}', [PayrollGroupController::class, 'undoAssignment']);
 });
 
 // ============================================
@@ -331,3 +339,15 @@ Route::prefix('attendance-qr/sessions')->group(function () {
     Route::post('{session}/refresh', [GenerateQrCodeController::class, 'refresh']);
     Route::post('{session}/revoke', [GenerateQrCodeController::class, 'revoke']);
 });
+
+ 
+Route::get('payslips', [PayslipController::class, 'index']);
+Route::get('payslips/{payroll}', [PayslipController::class, 'show']);
+
+Route::get('employee-payrolls', [EmployeePayrollController::class, 'index']);
+
+
+//holidays 
+Route::get('holiday-pay-rules/types', [HolidayPayRuleController::class, 'types']);
+Route::apiResource('holiday-pay-rules', HolidayPayRuleController::class);
+Route::get('holiday-pays', [HolidayPayController::class, 'index']);

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class TimeLog extends Model
 {
@@ -85,5 +86,9 @@ class TimeLog extends Model
     public function attendanceScans(): HasMany
     {
         return $this->hasMany(AttendanceScan::class);
+    }
+    public function holidayPay(): HasOne
+    {
+        return $this->hasOne(PayrollHolidayPay::class);
     }
 }

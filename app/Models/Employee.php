@@ -154,4 +154,9 @@ class Employee extends Model
         return $this->hasMany(AttendanceScan::class);
     }
 
+    public function holidayPays(): HasMany
+    {
+        return $this->hasMany(PayrollHolidayPay::class);
+    }
+
 }

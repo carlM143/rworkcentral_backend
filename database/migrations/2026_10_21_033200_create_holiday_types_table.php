@@ -15,6 +15,8 @@ return new class extends Migration
             $table->string('type_name');
             $table->text('description')->nullable();
 
+            $table->boolean('requires_prior_day_present')->default(false);
+
             $table->boolean('status')->default(true);
 
             $table->timestamps();

@@ -7,13 +7,12 @@ use App\Models\ContributionChangeLog;
 use App\Models\ContributionDeductionSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class ContributionDeductionSettingController extends Controller
 {
     private const RELATIONS = [
         'company:id,company_name',
-        'department:id,company_id,department_code,department_name',
-        'salaryType:id,type_name',
         'contributionType:id,contribution_code,contribution_name,provider',
     ];
 
@@ -21,16 +20,9 @@ class ContributionDeductionSettingController extends Controller
     {
         return [
             'company_id' => $setting->company_id,
-            'department_id' => $setting->department_id,
-            'salary_type_id' => $setting->salary_type_id,
             'contribution_type_id' => $setting->contribution_type_id,
-            'deduction_schedule' => $setting->deduction_schedule,
             'first_cutoff_percent' => $setting->first_cutoff_percent,
             'second_cutoff_percent' => $setting->second_cutoff_percent,
-            'week_1_percent' => $setting->week_1_percent,
-            'week_2_percent' => $setting->week_2_percent,
-            'week_3_percent' => $setting->week_3_percent,
-            'week_4_percent' => $setting->week_4_percent,
             'effective_from' => $setting->effective_from?->format('Y-m-d'),
             'effective_to' => $setting->effective_to?->format('Y-m-d'),
             'is_status' => (bool) $setting->is_status,
@@ -41,10 +33,7 @@ class ContributionDeductionSettingController extends Controller
     {
         return [
             'company_id' => ['required', 'integer', 'exists:companies,id'],
-            'department_id' => ['nullable', 'integer', 'exists:departments,id'],
-            'salary_type_id' => ['nullable', 'integer', 'exists:salary_types,id'],
             'contribution_type_id' => ['required', 'integer', 'exists:contribution_types,id'],
-            'deduction_schedule' => ['nullable', 'string', 'max:50'],
             'first_cutoff_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'second_cutoff_percent' => [
                 'required',
@@ -61,10 +50,6 @@ class ContributionDeductionSettingController extends Controller
                     }
                 },
             ],
-            'week_1_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'week_2_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'week_3_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'week_4_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
             'is_status' => ['nullable', 'boolean'],
@@ -72,28 +57,38 @@ class ContributionDeductionSettingController extends Controller
         ];
     }
 
-    private function resolveDeductionSchedule(array $validated): string
+    private function scheduleLabel(ContributionDeductionSetting $setting): string
     {
-        if (!empty($validated['deduction_schedule'])) {
-            return (string) $validated['deduction_schedule'];
+        $first = (float) $setting->first_cutoff_percent;
+        $second = (float) $setting->second_cutoff_percent;
+
+        return match (true) {
+            $first >= 100 => 'first cutoff only',
+            $second >= 100 => 'second cutoff only',
+            default => "{$first}% / {$second}% split",
+        };
+    }
+
+    private function guardOverlap(array $validated, ?int $ignoreId = null): void
+    {
+        $from = $validated['effective_from'];
+        $to = $validated['effective_to'] ?? null;
+
+        $overlap = ContributionDeductionSetting::query()
+            ->where('company_id', $validated['company_id'])
+            ->where('contribution_type_id', $validated['contribution_type_id'])
+            ->where('is_status', true)
+            ->when($ignoreId, fn ($q) => $q->whereKeyNot($ignoreId))
+            ->when($to, fn ($q) => $q->whereDate('effective_from', '<=', $to))
+            ->where(fn ($q) => $q->whereNull('effective_to')
+                ->orWhereDate('effective_to', '>=', $from))
+            ->exists();
+
+        if ($overlap) {
+            throw ValidationException::withMessages([
+                'effective_from' => 'This contribution already has an active deduction setting for these dates. End the existing one first.',
+            ]);
         }
-
-        $first = round((float) ($validated['first_cutoff_percent'] ?? 0), 2);
-        $second = round((float) ($validated['second_cutoff_percent'] ?? 0), 2);
-
-        if (abs($first - 100.0) < 0.01 && abs($second) < 0.01) {
-            return 'first_deduction';
-        }
-
-        if (abs($first) < 0.01 && abs($second - 100.0) < 0.01) {
-            return 'second_deduction';
-        }
-
-        if (abs($first - 50.0) < 0.01 && abs($second - 50.0) < 0.01) {
-            return 'split_50_50';
-        }
-
-        return 'custom_split';
     }
 
     public function index(Request $request): JsonResponse
@@ -102,14 +97,6 @@ class ContributionDeductionSettingController extends Controller
 
         if ($request->filled('company_id')) {
             $query->where('company_id', $request->integer('company_id'));
-        }
-
-        if ($request->filled('department_id')) {
-            $query->where('department_id', $request->integer('department_id'));
-        }
-
-        if ($request->filled('salary_type_id')) {
-            $query->where('salary_type_id', $request->integer('salary_type_id'));
         }
 
         if ($request->filled('contribution_type_id')) {
@@ -134,11 +121,13 @@ class ContributionDeductionSettingController extends Controller
         $reason = $validated['reason'] ?? null;
         unset($validated['reason']);
 
-        $setting = ContributionDeductionSetting::create([
-            ...$validated,
-            'deduction_schedule' => $this->resolveDeductionSchedule($validated),
-            'is_status' => $validated['is_status'] ?? true,
-        ]);
+        $validated['is_status'] = $validated['is_status'] ?? true;
+
+        if ($validated['is_status']) {
+            $this->guardOverlap($validated);
+        }
+
+        $setting = ContributionDeductionSetting::create($validated);
 
         ContributionChangeLog::record([
             'contribution_type_id' => $setting->contribution_type_id,
@@ -148,7 +137,7 @@ class ContributionDeductionSettingController extends Controller
             'action' => 'created',
             'old_values' => null,
             'new_values' => $this->snapshot($setting),
-            'reason' => $reason ?? "Created deduction setting ({$setting->deduction_schedule}) effective {$setting->effective_from?->format('Y-m-d')}.",
+            'reason' => $reason ?? "Created deduction setting ({$this->scheduleLabel($setting)}) effective {$setting->effective_from?->format('Y-m-d')}.",
         ]);
 
         return response()->json([
@@ -173,13 +162,15 @@ class ContributionDeductionSettingController extends Controller
         $reason = $validated['reason'] ?? null;
         unset($validated['reason']);
 
+        $validated['is_status'] = $validated['is_status'] ?? $contributionDeductionSetting->is_status;
+
+        if ($validated['is_status']) {
+            $this->guardOverlap($validated, $contributionDeductionSetting->id);
+        }
+
         $oldValues = $this->snapshot($contributionDeductionSetting);
 
-        $contributionDeductionSetting->update([
-            ...$validated,
-            'deduction_schedule' => $this->resolveDeductionSchedule($validated),
-            'is_status' => $validated['is_status'] ?? $contributionDeductionSetting->is_status,
-        ]);
+        $contributionDeductionSetting->update($validated);
 
         $fresh = $contributionDeductionSetting->fresh();
         $newValues = $this->snapshot($fresh);
@@ -192,7 +183,7 @@ class ContributionDeductionSettingController extends Controller
             $defaultReason = "Updated deduction setting effective date from {$oldValues['effective_from']} to {$newValues['effective_from']}.";
         } else {
             $action = 'updated';
-            $defaultReason = "Updated deduction setting ({$fresh->deduction_schedule}).";
+            $defaultReason = "Updated deduction setting ({$this->scheduleLabel($fresh)}).";
         }
 
         ContributionChangeLog::record([
@@ -219,6 +210,7 @@ class ContributionDeductionSettingController extends Controller
         $settingId = $contributionDeductionSetting->id;
         $typeId = $contributionDeductionSetting->contribution_type_id;
         $companyId = $contributionDeductionSetting->company_id;
+        $label = $this->scheduleLabel($contributionDeductionSetting);
 
         $contributionDeductionSetting->delete();
 
@@ -230,7 +222,7 @@ class ContributionDeductionSettingController extends Controller
             'action' => 'deleted',
             'old_values' => $oldValues,
             'new_values' => null,
-            'reason' => $request->input('reason') ?: "Deleted deduction setting #{$settingId} ({$oldValues['deduction_schedule']}).",
+            'reason' => $request->input('reason') ?: "Deleted deduction setting #{$settingId} ({$label}).",
         ]);
 
         return response()->json([

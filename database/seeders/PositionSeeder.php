@@ -31,6 +31,7 @@ class PositionSeeder extends Seeder
                 ['name' => 'Field Technician', 'description' => 'Performs on-site installation, maintenance, and troubleshooting.'],
                 ['name' => 'IT Support Specialist', 'description' => 'Provides technical support and maintains computer systems.'],
                 ['name' => 'Junior Technician', 'description' => 'Assists with technical installation, maintenance, and support tasks.'],
+                ['name' => 'Driver', 'description' => 'Transports technicians, equipment, and materials to field sites and keeps the service vehicle in good condition.'],
             ],
         ];
 

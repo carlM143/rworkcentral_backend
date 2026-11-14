@@ -40,7 +40,11 @@ class DatabaseSeeder extends Seeder
 
             EmployeeSeeder::class,
 
+            EmployeeLifecycleSeeder::class,
+
             TimeLogSeeder::class,
+
+            HolidayPayRuleSeeder::class,
         ]);
     }
 }
