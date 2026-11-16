@@ -12,6 +12,9 @@ use App\Http\Controllers\Api\Admin\PendingRequestController;
 use App\Http\Controllers\Api\Admin\UpcomingEventController;
 use App\Http\Controllers\Api\Admin\DashboardPayrollController;
 use App\Http\Controllers\Api\Admin\NotificationController;
+use App\Http\Controllers\Api\Admin\AccountController;
+use App\Http\Controllers\Api\Admin\WageOrderController;
+use App\Http\Controllers\Api\Admin\RegionalRateController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -76,6 +79,8 @@ Route::delete('vehicles/{vehicle}', [VehicleController::class, 'destroy']);
 // ============================================
 
 Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+Route::get('dashboard/attendance', [DashboardController::class, 'attendance']);
+Route::get('dashboard/headcount', [DashboardController::class, 'headcount']);
 
 Route::get('dashboard/pending-requests', [PendingRequestController::class, 'summary']);
 Route::get('pending-requests', [PendingRequestController::class, 'index']);
@@ -89,3 +94,30 @@ Route::get('notifications/summary', [NotificationController::class, 'summary']);
 Route::get('notifications', [NotificationController::class, 'index']);
 Route::patch('notifications/read-all', [NotificationController::class, 'markAllRead']);
 Route::patch('notifications/{notification}/read', [NotificationController::class, 'markRead']);
+
+// ============================================
+// MY ACCOUNT (signed-in user)
+// ============================================
+
+Route::get('account', [AccountController::class, 'show']);
+Route::put('account', [AccountController::class, 'update']);
+Route::put('account/password', [AccountController::class, 'updatePassword']);
+Route::delete('account/sessions', [AccountController::class, 'destroySessions']);
+
+// ============================================
+// COMPENSATION: WAGE ORDERS
+// ============================================
+
+Route::get('wage-orders/meta', [WageOrderController::class, 'meta']);
+Route::get('wage-orders', [WageOrderController::class, 'index']);
+Route::post('wage-orders', [WageOrderController::class, 'store']);
+Route::get('wage-orders/{wageOrder}', [WageOrderController::class, 'show']);
+Route::put('wage-orders/{wageOrder}', [WageOrderController::class, 'update']);
+Route::delete('wage-orders/{wageOrder}', [WageOrderController::class, 'destroy']);
+Route::patch('wage-orders/{wageOrder}/publish', [WageOrderController::class, 'publish']);
+Route::patch('wage-orders/{wageOrder}/cancel', [WageOrderController::class, 'cancel']);
+Route::post('wage-orders/{wageOrder}/document', [WageOrderController::class, 'uploadDocument']);
+Route::delete('wage-orders/{wageOrder}/document', [WageOrderController::class, 'deleteDocument']);
+
+Route::get('regional-rates', [RegionalRateController::class, 'index']);
+Route::patch('regional-rates/locations/{location}', [RegionalRateController::class, 'updateLocation']);

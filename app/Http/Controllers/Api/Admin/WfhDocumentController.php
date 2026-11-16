@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\TimeLog;
 use App\Models\WfhTracker;
 use App\Models\WorkFromHome;
+use App\Services\NotificationService;
 use App\Services\WfhScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
-use App\Services\NotificationService;
 use Throwable;
 
 class WfhDocumentController extends Controller
@@ -144,6 +144,19 @@ class WfhDocumentController extends Controller
         if ($replacedDocument) {
             Storage::disk('public')->delete($replacedDocument);
         }
+
+        $workFromHome->loadMissing('employee:id,firstname,lastname');
+        app(NotificationService::class)->toAdmins(
+            category: 'request',
+            title: 'WFH proof submitted',
+            message: (trim(($workFromHome->employee?->firstname ?? '').' '.($workFromHome->employee?->lastname ?? '')) ?: 'An employee')
+                .' submitted proof of work for '.Carbon::parse($validated['date_attendance'])->format('M j, Y')
+                .' ('.$workFromHome->request_no.').',
+            url: '/admin/wfh/documents',
+            exceptUserId: $request->user()?->id,
+            subjectType: 'wfh',
+            subjectId: $workFromHome->id,
+        );
 
         return response()->json([
             'success' => true,

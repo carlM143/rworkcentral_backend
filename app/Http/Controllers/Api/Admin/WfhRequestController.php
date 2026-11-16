@@ -8,6 +8,7 @@ use App\Models\TimeLog;
 use App\Models\WfhImage;
 use App\Models\WfhTracker;
 use App\Models\WorkFromHome;
+use App\Services\NotificationService;
 use App\Services\WfhScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -15,8 +16,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
-use App\Services\NotificationService;
 
+/**
+ * WFH Requests (admin) - work_from_home table.
+ *
+ * Flow: file request (pending) -> approve / reject.
+ * Approved requests appear in WFH Document Review.
+ */
 class WfhRequestController extends Controller
 {
     public function __construct(private readonly WfhScheduleService $schedule)
@@ -160,6 +166,14 @@ class WfhRequestController extends Controller
             ]);
         });
 
+        $this->notifyAdmins(
+            $record,
+            'New WFH request',
+            '{name} filed {no} for {days} day(s), {dates}.',
+            'info',
+            $request->user()?->id,
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'WFH request filed. It is now pending approval.',
@@ -174,6 +188,8 @@ class WfhRequestController extends Controller
         ]);
 
         $record = $this->decide($request, $workFromHome, 'approved', $validated['remarks'] ?? null);
+
+        $this->notifyEmployee($record, 'Your WFH request was approved', '{no} ({dates}) was approved.', 'success');
 
         return response()->json([
             'success' => true,
@@ -191,6 +207,13 @@ class WfhRequestController extends Controller
         ]);
 
         $record = $this->decide($request, $workFromHome, 'rejected', $validated['remarks']);
+
+        $this->notifyEmployee(
+            $record,
+            'Your WFH request was rejected',
+            '{no} ({dates}) was rejected. Reason: '.$validated['remarks'],
+            'warning',
+        );
 
         return response()->json([
             'success' => true,
@@ -308,6 +331,56 @@ class WfhRequestController extends Controller
     /**
      * @return array<int, string>
      */
+    // =====================================================
+    // NOTIFICATIONS
+    // =====================================================
+
+    /**
+     * {name}, {no}, {days} and {dates} in the message are filled in.
+     */
+    private function notificationText(WorkFromHome $record, string $message): string
+    {
+        $record->loadMissing('employee:id,firstname,lastname');
+        $start = Carbon::parse($record->start_date);
+        $end = Carbon::parse($record->end_date);
+
+        return strtr($message, [
+            '{name}' => trim(($record->employee?->firstname ?? '').' '.($record->employee?->lastname ?? '')) ?: 'An employee',
+            '{no}' => $record->request_no,
+            '{days}' => (string) $record->number_of_days,
+            '{dates}' => $start->isSameDay($end)
+                ? $start->format('M j, Y')
+                : $start->format('M j').'–'.$end->format('M j, Y'),
+        ]);
+    }
+
+    private function notifyAdmins(WorkFromHome $record, string $title, string $message, string $level, ?int $exceptUserId): void
+    {
+        app(NotificationService::class)->toAdmins(
+            category: 'request',
+            title: $title,
+            message: $this->notificationText($record, $message),
+            url: '/admin/wfh/requests',
+            level: $level,
+            exceptUserId: $exceptUserId,
+            subjectType: 'wfh',
+            subjectId: $record->id,
+        );
+    }
+
+    private function notifyEmployee(WorkFromHome $record, string $title, string $message, string $level): void
+    {
+        app(NotificationService::class)->toEmployee(
+            employeeId: (int) $record->employee_id,
+            category: 'decision',
+            title: $title,
+            message: $this->notificationText($record, $message),
+            level: $level,
+            subjectType: 'wfh',
+            subjectId: $record->id,
+        );
+    }
+
     private function relations(): array
     {
         return [
