@@ -46,24 +46,123 @@ class LifecycleWorkflowController extends Controller
         return response()->json(['data' => Employee::with($this->employeeRelations())->orderBy('lastname')->get()->map(fn ($e) => $this->employeeData($e))]);
     }
 
-    public function milestones(Request $request)
+    private function formatMilestone(EmployeeLifecycleMilestone $m): array
     {
-        $this->authorizeAdmin($request);
-        app(\App\Services\LifecycleMilestoneSync::class)->sync();
-        $relations = array_map(fn ($r) => 'employee.'.$r, $this->employeeRelations());
-        $records = EmployeeLifecycleMilestone::with([...$relations, 'lifecycleStage.lifecyclePolicy', 'evaluationDocument'])->orderBy('due_date')->get();
-        return response()->json(['data' => $records->map(fn ($m) => [
-            ...$this->employeeData($m->employee), 'id' => $m->id,
+        return [
+            ...$this->employeeData($m->employee),
+            'id' => $m->id,
             'lifecycleStageId' => $m->lifecycle_stage_id,
             'requiresAttachment' => $m->lifecycleStage->requires_attachment,
-            'stageName' => $m->lifecycleStage->stage_name, 'stageCode' => $m->lifecycleStage->stage_code,
+            'stageName' => $m->lifecycleStage->stage_name,
+            'stageCode' => $m->lifecycleStage->stage_code,
             'policyName' => $m->lifecycleStage->lifecyclePolicy->name,
-            'dueDate' => $m->due_date?->format('Y-m-d'), 'status' => $m->status, 'remarks' => $m->remarks,
+            'dueDate' => $m->due_date?->format('Y-m-d'),
+            'status' => $m->status,
+            'remarks' => $m->remarks,
             'evaluationDocumentId' => $m->evaluation_document_id,
             'attachmentName' => $m->evaluationDocument?->original_name,
             'attachmentSize' => $m->evaluationDocument ? round($m->evaluationDocument->size / 1024).' KB' : null,
             'attachedAt' => $m->evaluationDocument?->created_at?->toISOString(),
-        ])]);
+        ];
+    }
+
+    public function milestones(Request $request)
+    {
+        $this->authorizeAdmin($request);
+        app(\App\Services\LifecycleMilestoneSync::class)->sync();
+
+        $today = now()->startOfDay()->toDateString();
+        $dueSoonEnd = now()->startOfDay()->addDays(30)->toDateString();
+
+        $stats = [
+            'total' => EmployeeLifecycleMilestone::count(),
+            'completed' => EmployeeLifecycleMilestone::where('status', 'completed')->count(),
+            'pending' => EmployeeLifecycleMilestone::where('status', 'pending')->count(),
+            'overdue' => EmployeeLifecycleMilestone::where('status', 'pending')
+                ->whereDate('due_date', '<', $today)
+                ->count(),
+            'dueSoon' => EmployeeLifecycleMilestone::where('status', 'pending')
+                ->whereDate('due_date', '>=', $today)
+                ->whereDate('due_date', '<=', $dueSoonEnd)
+                ->count(),
+            'probationaryUpcoming' => EmployeeLifecycleMilestone::whereHas('lifecycleStage', fn ($q) => $q->where('stage_code', 'M6_REGULARIZATION'))
+                ->whereHas('employee.latestEmployment.employmentType', fn ($q) => $q->where('name', 'Probationary'))
+                ->count(),
+        ];
+
+        $departments = \App\Models\Department::orderBy('department_name')->pluck('department_name')->values();
+
+        $relations = array_map(fn ($r) => 'employee.'.$r, $this->employeeRelations());
+        $query = EmployeeLifecycleMilestone::with([...$relations, 'lifecycleStage.lifecyclePolicy', 'evaluationDocument']);
+
+        if ($search = trim((string) $request->query('search', ''))) {
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('employee', function ($emp) use ($search) {
+                    $emp->where('firstname', 'like', "%{$search}%")
+                        ->orWhere('lastname', 'like', "%{$search}%")
+                        ->orWhere('emp_id', 'like', "%{$search}%")
+                        ->orWhereRaw("CONCAT(firstname, ' ', lastname) LIKE ?", ["%{$search}%"]);
+                })->orWhereHas('lifecycleStage', function ($stage) use ($search) {
+                    $stage->where('stage_name', 'like', "%{$search}%")
+                        ->orWhere('stage_code', 'like', "%{$search}%");
+                });
+            });
+        }
+
+        if ($department = trim((string) $request->query('department', ''))) {
+            $query->whereHas('employee', function ($emp) use ($department) {
+                $emp->whereHas('latestEmployment.department', fn ($d) => $d->where('department_name', $department))
+                    ->orWhere(function ($fallback) use ($department) {
+                        $fallback->whereDoesntHave('latestEmployment.department')
+                            ->whereHas('department', fn ($d) => $d->where('department_name', $department));
+                    });
+            });
+        }
+
+        if ($employmentType = trim((string) $request->query('employment_type', ''))) {
+            $query->whereHas('employee.latestEmployment.employmentType', fn ($t) => $t->where('name', $employmentType));
+        }
+
+        $statusFilter = strtolower(trim((string) $request->query('status', '')));
+        if ($statusFilter === 'completed') {
+            $query->where('status', 'completed');
+        } elseif ($statusFilter === 'pending') {
+            $query->where('status', 'pending');
+        } elseif ($statusFilter === 'overdue') {
+            $query->where('status', 'pending')->whereDate('due_date', '<', $today);
+        } elseif ($statusFilter === 'due soon' || $statusFilter === 'due_soon') {
+            $query->where('status', 'pending')
+                ->whereDate('due_date', '>=', $today)
+                ->whereDate('due_date', '<=', $dueSoonEnd);
+        }
+
+        $query->orderBy('due_date')->orderBy('id');
+
+        if ($request->boolean('all')) {
+            $records = $query->get();
+            return response()->json([
+                'data' => $records->map(fn ($m) => $this->formatMilestone($m)),
+                'stats' => $stats,
+                'departments' => $departments,
+            ]);
+        }
+
+        $perPage = min(max((int) $request->query('per_page', 6), 1), 100);
+        $paginator = $query->paginate($perPage);
+
+        return response()->json([
+            'data' => $paginator->getCollection()->map(fn ($m) => $this->formatMilestone($m)),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem() ?? 0,
+                'to' => $paginator->lastItem() ?? 0,
+            ],
+            'stats' => $stats,
+            'departments' => $departments,
+        ]);
     }
 
     public function employmentTypeChanges(Request $request, Employee $employee)
