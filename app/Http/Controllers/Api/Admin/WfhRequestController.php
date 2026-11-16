@@ -15,13 +15,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use App\Services\NotificationService;
 
-/**
- * WFH Requests (admin) - work_from_home table.
- *
- * Flow: file request (pending) -> approve / reject.
- * Approved requests appear in WFH Document Review.
- */
 class WfhRequestController extends Controller
 {
     public function __construct(private readonly WfhScheduleService $schedule)

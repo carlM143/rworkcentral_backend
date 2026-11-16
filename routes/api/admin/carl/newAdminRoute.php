@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\Admin\WfhRequestController;
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\PendingRequestController;
 use App\Http\Controllers\Api\Admin\UpcomingEventController;
+use App\Http\Controllers\Api\Admin\DashboardPayrollController;
+use App\Http\Controllers\Api\Admin\NotificationController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -78,3 +80,12 @@ Route::get('dashboard/summary', [DashboardController::class, 'summary']);
 Route::get('dashboard/pending-requests', [PendingRequestController::class, 'summary']);
 Route::get('pending-requests', [PendingRequestController::class, 'index']);
 Route::get('dashboard/upcoming-events', [UpcomingEventController::class, 'index']);
+Route::get('upcoming-events', [UpcomingEventController::class, 'index']);
+
+Route::get('dashboard/payroll-status', [DashboardPayrollController::class, 'show']);    
+
+// NOTIFICATIONS (signed-in user)
+Route::get('notifications/summary', [NotificationController::class, 'summary']);
+Route::get('notifications', [NotificationController::class, 'index']);
+Route::patch('notifications/read-all', [NotificationController::class, 'markAllRead']);
+Route::patch('notifications/{notification}/read', [NotificationController::class, 'markRead']);
