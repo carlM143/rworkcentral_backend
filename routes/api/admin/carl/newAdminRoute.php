@@ -7,7 +7,9 @@ use App\Http\Controllers\Api\Admin\TripTicketController;
 use App\Http\Controllers\Api\Admin\VehicleController;
 use App\Http\Controllers\Api\Admin\WfhDocumentController;
 use App\Http\Controllers\Api\Admin\WfhRequestController;
-
+use App\Http\Controllers\Api\Admin\DashboardController;
+use App\Http\Controllers\Api\Admin\PendingRequestController;
+use App\Http\Controllers\Api\Admin\UpcomingEventController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -66,3 +68,13 @@ Route::get('vehicles', [VehicleController::class, 'index']);
 Route::post('vehicles', [VehicleController::class, 'store']);
 Route::put('vehicles/{vehicle}', [VehicleController::class, 'update']);
 Route::delete('vehicles/{vehicle}', [VehicleController::class, 'destroy']);
+
+// ============================================
+// DASHBOARD
+// ============================================
+
+Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+
+Route::get('dashboard/pending-requests', [PendingRequestController::class, 'summary']);
+Route::get('pending-requests', [PendingRequestController::class, 'index']);
+Route::get('dashboard/upcoming-events', [UpcomingEventController::class, 'index']);

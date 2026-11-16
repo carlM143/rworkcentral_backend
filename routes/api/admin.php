@@ -256,6 +256,8 @@ Route::middleware('can:manage-salary-adjustments')->group(function () {
     Route::patch('salary-adjustments/{salaryAdjustment}/approve', [SalaryAdjustmentController::class, 'approve']);
     Route::patch('salary-adjustments/{salaryAdjustment}/reject', [SalaryAdjustmentController::class, 'reject']);
     Route::patch('salary-adjustments/{salaryAdjustment}/apply', [SalaryAdjustmentController::class, 'apply']);
+    Route::get('salary-adjustments/{salaryAdjustment}', [SalaryAdjustmentController::class, 'show']);
+    Route::put('salary-adjustments/{salaryAdjustment}', [SalaryAdjustmentController::class, 'update']);
 });
 
 // ============================================
