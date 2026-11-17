@@ -13,9 +13,17 @@ use Illuminate\Support\Facades\Schema;
  *
  * Basic pay already covers a normal day (100%), so the amount stored is only
  * the extra on top of it:
- *  - worked holiday:   minute rate × worked minutes (max 8h) × (rate% − 100%)
- *  - holiday overtime: minute rate × OT minutes × (OT rate% − 125%)  (125% is already in overtime pay)
- *  - unworked holiday: daily rate × rate%  (daily-paid only, per the seeded rules)
+ *  - worked holiday:    minute rate × worked minutes (max 8h) × (rate% − 100%)
+ *  - rest day worked:   minute rate × worked minutes (max 8h) × rate%
+ *                       (a rest day is not in basic pay, so nothing to subtract)
+ *  - holiday overtime:  minute rate × OT minutes × (OT rate% − 125%)  (125% is already in overtime pay)
+ *  - unworked holiday:  daily rate × rate%  (daily-paid only, per the seeded rules)
+ *
+ * Who is paid comes from holidays.employee_coverage (set on the Holiday Coverage page):
+ *  - all    : everyone in the holiday's locations
+ *  - only   : only the selected employees, and only inside the holiday's locations
+ *  - except : (legacy) everyone in the locations minus the selected employees;
+ *             the Coverage page re-saves these as "only"
  */
 class HolidayPayService
 {
@@ -23,7 +31,15 @@ class HolidayPayService
     private const REGULAR_OT_MULTIPLIER = 1.25;
 
     // When two holidays fall on the same date, the higher-paying type wins.
-    private const TYPE_PRIORITY = ['double' => 4, 'regular' => 3, 'special_non_working' => 2, 'special_working' => 1];
+    // Keys are lower-case; type codes are lower-cased before the lookup (DB codes are upper-case).
+    private const TYPE_PRIORITY = [
+        'double' => 4,
+        'regular' => 3,
+        'special_non_working' => 2,
+        'special' => 2,
+        'special_working' => 1,
+        'company' => 1,
+    ];
 
     /**
      * Load everything needed for one payroll period in a few queries.
@@ -42,7 +58,7 @@ class HolidayPayService
                 'holidays.id as holiday_id',
                 'holidays.holiday_name',
                 'holidays.holiday_type_id',
-                'holidays.applies_to as policy',
+                'holidays.employee_coverage as policy',
                 'holiday_types.type_code',
                 'holiday_types.requires_prior_day_present',
                 "holiday_dates.{$dateColumn} as holiday_date",
@@ -60,19 +76,19 @@ class HolidayPayService
             ->groupBy('holiday_id')
             ->map(fn ($rows) => $rows->pluck('location_id')->map(fn ($id) => (int) $id)->all());
 
-        $selections = Schema::hasTable('holiday_employee_selections')
-            ? DB::table('holiday_employee_selections')
-                ->whereIn('holiday_id', $holidayIds)
-                ->get(['holiday_id', 'employee_id'])
-                ->groupBy('holiday_id')
-                ->map(fn ($rows) => $rows->pluck('employee_id')->map(fn ($id) => (int) $id)->all())
-            : collect();
+        $employeeSelections = DB::table('holiday_employee_coverage')
+            ->whereIn('holiday_id', $holidayIds)
+            ->get(['holiday_id', 'employee_id'])
+            ->groupBy('holiday_id')
+            ->map(fn ($rows) => $rows->pluck('employee_id')->map(fn ($id) => (int) $id)->all());
 
         $holidays = $holidayRows
-            ->map(function ($row) use ($locations, $selections) {
+            ->map(function ($row) use ($locations, $employeeSelections) {
                 $row->holiday_date = substr((string) $row->holiday_date, 0, 10);
+                $row->policy = $row->policy ?: 'all';
                 $row->location_ids = $locations->get($row->holiday_id, []);
-                $row->selected_ids = $selections->get($row->holiday_id, []);
+                $row->selected_ids = $employeeSelections->get($row->holiday_id, []);
+
                 return $row;
             })
             ->groupBy('holiday_date');
@@ -156,7 +172,7 @@ class HolidayPayService
         foreach ($context['holidays'] as $date => $holidaysOnDate) {
             $holiday = $holidaysOnDate
                 ->filter(fn ($h) => $this->covers($h, $employeeId, $locationId))
-                ->sortByDesc(fn ($h) => self::TYPE_PRIORITY[$h->type_code] ?? 0)
+                ->sortByDesc(fn ($h) => self::TYPE_PRIORITY[strtolower((string) $h->type_code)] ?? 0)
                 ->first();
 
             if (!$holiday) {
@@ -179,7 +195,11 @@ class HolidayPayService
                 }
 
                 $workedMinutes = min((int) ($log->worked_minutes ?? self::MINUTES_PER_DAY), self::MINUTES_PER_DAY);
-                $amount = $minuteRate * $workedMinutes * ((float) $rule->rate_percent / 100 - 1);
+
+                // Normal day: basic pay already has 100%, so only the extra is added.
+                // Rest day: basic pay has nothing for that day, so the full rate is added.
+                $alreadyPaid = $isRestDay ? 0.0 : 1.0;
+                $amount = $minuteRate * $workedMinutes * ((float) $rule->rate_percent / 100 - $alreadyPaid);
 
                 $otMinutes = (int) $otByDate->get($date, collect())
                     ->sum(fn ($ot) => $ot->start_at && $ot->end_at
@@ -221,20 +241,20 @@ class HolidayPayService
         return $lines;
     }
 
-    /** Holiday Coverage: locations first, then the selection policy. */
+    /** Holiday Coverage: locations always apply first, then the selected employees. */
     private function covers(object $holiday, int $employeeId, ?int $locationId): bool
     {
         $inLocation = $holiday->location_ids === [] || in_array($locationId, $holiday->location_ids, true);
-        $selected = in_array($employeeId, $holiday->selected_ids, true);
+        $picked = in_array($employeeId, $holiday->selected_ids, true);
 
         return match ($holiday->policy) {
-            'only_selected' => $selected,
-            'all_except_selected' => $inLocation && !$selected,
+            'only' => $inLocation && $picked,
+            'except' => $inLocation && !$picked,
             default => $inLocation,
         };
     }
 
-    /** The most specific active rule for the date: daily_paid / monthly_paid before "all". */
+    /** The most specific active rule for the date: daily_paid / monthly_paid before "all", then the latest start. */
     private function rule(Collection $rules, int $typeId, string $scenario, string $salaryGroup, string $date): ?HolidayPayRule
     {
         return $rules
@@ -243,7 +263,13 @@ class HolidayPayService
                 && in_array($r->applies_to, [$salaryGroup, 'all'], true)
                 && $r->effective_from->toDateString() <= $date
                 && ($r->effective_to === null || $r->effective_to->toDateString() >= $date))
-            ->sortByDesc(fn (HolidayPayRule $r) => ($r->applies_to === 'all' ? 0 : 10) + $r->effective_from->timestamp / 1e10)
+            ->sort(function (HolidayPayRule $a, HolidayPayRule $b) {
+                $specificity = ($b->applies_to === 'all' ? 0 : 1) <=> ($a->applies_to === 'all' ? 0 : 1);
+
+                return $specificity !== 0
+                    ? $specificity
+                    : $b->effective_from->timestamp <=> $a->effective_from->timestamp;
+            })
             ->first();
     }
 

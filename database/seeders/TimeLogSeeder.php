@@ -12,7 +12,7 @@ use Illuminate\Database\Seeder;
 class TimeLogSeeder extends Seeder
 {
     private const START_DATE = '2026-10-26';
-    private const END_DATE = '2026-11-10';
+    private const END_DATE = '2026-11-17';
 
     private const BREAK_START = '12:00';
     private const BREAK_END = '13:00';

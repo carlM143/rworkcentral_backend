@@ -353,3 +353,6 @@ Route::get('employee-payrolls', [EmployeePayrollController::class, 'index']);
 Route::get('holiday-pay-rules/types', [HolidayPayRuleController::class, 'types']);
 Route::apiResource('holiday-pay-rules', HolidayPayRuleController::class);
 Route::get('holiday-pays', [HolidayPayController::class, 'index']);
+Route::get('holiday-coverage', [HolidayCoverageController::class, 'index']);
+Route::get('holidays/{holiday}/coverage', [HolidayCoverageController::class, 'show']);
+Route::put('holidays/{holiday}/coverage', [HolidayCoverageController::class, 'update']);
