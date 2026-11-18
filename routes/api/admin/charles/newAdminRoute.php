@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\Admin\LifecycleEvaluationDocumentController;
 use App\Http\Controllers\Api\Admin\LifecycleWorkflowController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('reports/attendance', [\App\Http\Controllers\Api\Admin\AttendanceReportController::class, 'index']);
+
 // Lifecycle policies and stages
 Route::get('lifecycle/policies', [LifecycleConfigurationController::class, 'policies']);
 Route::get('lifecycle/employment-types', [LifecycleConfigurationController::class, 'employmentTypes']);

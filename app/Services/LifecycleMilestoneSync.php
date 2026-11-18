@@ -33,6 +33,23 @@ class LifecycleMilestoneSync
         });
     }
 
+    public function refreshPendingStageDates(EmployeeLifecycleStage $stage): void
+    {
+        $typeId = $stage->lifecyclePolicy()->value('employment_type_id');
+        $stage->milestones()->where('status', 'pending')->with('employee.latestEmployment')
+            ->chunkById(200, function ($milestones) use ($stage, $typeId) {
+                foreach ($milestones as $milestone) {
+                    $employment = $milestone->employee?->latestEmployment;
+                    if (!$employment?->date_hired || ($typeId !== null && (int) $typeId !== (int) $employment->employment_type_id)) {
+                        continue;
+                    }
+                    $milestone->update([
+                        'due_date' => $employment->date_hired->copy()->addMonthsNoOverflow($stage->targetMonthAfterHire()),
+                    ]);
+                }
+            });
+    }
+
     /**
      * Create the milestones the employee should have based on their hire date,
      * employment type and the active policy stages.
@@ -61,15 +78,19 @@ class LifecycleMilestoneSync
         })->values();
 
         foreach ($applicable as $stage) {
-            // The employee/stage unique key prevents duplicates, and existing
-            // evaluations, remarks and dates are never overwritten.
-            EmployeeLifecycleMilestone::firstOrCreate([
+            $targetDate = $employment->date_hired->copy()->addMonthsNoOverflow($stage->targetMonthAfterHire());
+
+            $milestone = EmployeeLifecycleMilestone::firstOrCreate([
                 'employee_id' => $employee->id,
                 'lifecycle_stage_id' => $stage->id,
             ], [
-                'due_date' => $employment->date_hired->copy()->addMonthsNoOverflow((int) $stage->months_after_hire),
+                'due_date' => $targetDate,
                 'status' => 'pending',
             ]);
+            if ($stage->is_managed_regularization && $milestone->status === 'pending'
+                && $milestone->due_date?->toDateString() !== $targetDate->toDateString()) {
+                $milestone->update(['due_date' => $targetDate]);
+            }
         }
 
         if (!$pruneObsolete) {

@@ -21,6 +21,12 @@ class EmployeeLifecyclePolicy extends Model
         ];
     }
 
+    public function regularizationStage()
+    {
+        return $this->hasOne(EmployeeLifecycleStage::class, 'lifecycle_policy_id')
+            ->where('is_managed_regularization', true);
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);
