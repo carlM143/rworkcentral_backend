@@ -50,6 +50,7 @@ class PayrollGenerationController extends Controller
                 'payrollGroup:id,group_name,frequency',
                 'salaryType:id,type_name',
                 'contributions.contributionType:id,contribution_code,contribution_name',
+                'holidayPays.holiday:id,holiday_name',
             ])
             ->get()
             ->sortBy(fn ($p) => "{$p->employee?->lastname} {$p->employee?->firstname}")
@@ -64,6 +65,8 @@ class PayrollGenerationController extends Controller
                     'employees' => $payrolls->count(),
                     'draft' => $payrolls->where('status', 'draft')->count(),
                     'finalized' => $payrolls->where('status', 'finalized')->count(),
+                    'holiday_pay' => round($payrolls->sum('holiday_pay'), 2),
+                    'unpaid_holiday_deduction' => round($payrolls->sum('unpaid_holiday_deduction'), 2),
                     'gross_pay' => round($payrolls->sum('gross_pay'), 2),
                     'total_deductions' => round($payrolls->sum('total_deductions'), 2),
                     'net_pay' => round($payrolls->sum('net_pay'), 2),

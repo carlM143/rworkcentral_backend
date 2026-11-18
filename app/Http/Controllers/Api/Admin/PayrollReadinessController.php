@@ -11,7 +11,9 @@ use App\Models\LateAdjustment;
 use App\Models\LeaveRequestDate;
 use App\Models\PayrollGroup;
 use App\Models\PayrollPeriod;
+use App\Models\TimeLog;
 use App\Models\TimeLogCorrectionRequest;
+use App\Services\HolidayPayService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +25,11 @@ class PayrollReadinessController extends Controller
     private const SEMI_MONTHLY = 'semi_monthly';
 
     private ?string $leaveDateColumn = null;
+
+    public function __construct(
+        private readonly HolidayPayService $holidayPay
+    ) {
+    }
 
     private function companyId(Request $request): int
     {
@@ -91,9 +98,10 @@ class PayrollReadinessController extends Controller
         ]);
 
         $groupFilter = isset($data['payroll_group_id']) ? (int) $data['payroll_group_id'] : null;
+        $companyId = $this->companyId($request);
 
         $period = PayrollPeriod::query()
-            ->where('company_id', $this->companyId($request))
+            ->where('company_id', $companyId)
             ->findOrFail($data['payroll_period_id']);
 
         $start = $period->cutoff_start->format('Y-m-d');
@@ -137,6 +145,17 @@ class PayrollReadinessController extends Controller
             ->orderBy('firstname')
             ->get();
 
+        // Holidays in the cut-off: who is covered, who worked, and who is paid for the day
+        $holidayContext = $this->holidayPay->prepare($companyId, $start, $end, $employeeIds);
+
+        $logsByEmployee = $holidayContext['holidays']->isEmpty()
+            ? collect()
+            : TimeLog::query()
+                ->whereIn('employee_id', $employeeIds)
+                ->whereIn('work_date', $holidayContext['holidays']->keys())
+                ->get(['id', 'employee_id', 'work_date', 'time_in', 'time_out'])
+                ->groupBy('employee_id');
+
         $pendingCorrections = $this->countByEmployee(
             TimeLogCorrectionRequest::query()
                 ->whereIn('employee_id', $employeeIds)
@@ -163,7 +182,9 @@ class PayrollReadinessController extends Controller
             $assignmentsByEmployee,
             $pendingCorrections,
             $pendingLateAdjustments,
-            $pendingTransfers
+            $pendingTransfers,
+            $holidayContext,
+            $logsByEmployee
         ) {
             $history = $assignmentsByEmployee->get($employee->id, collect());
             $group = $history->last()?->payrollGroup;
@@ -229,6 +250,15 @@ class PayrollReadinessController extends Controller
                 }
             }
 
+            // Holidays: an unworked holiday the employee is paid for counts as a paid day
+            $holidays = $this->holidayPay->daysFor(
+                $holidayContext,
+                $employee->id,
+                $logsByEmployee->get($employee->id, collect())
+            );
+
+            $paidHolidays = collect($holidays)->where('paid', true)->where('worked', false)->count();
+
             $hasBlocker = collect($issues)->contains('severity', 'blocker');
 
             return [
@@ -249,6 +279,9 @@ class PayrollReadinessController extends Controller
                     ?? null,
                 'time_logs_count' => $timeLogs,
                 'incomplete_logs_count' => $incomplete,
+                'paid_holidays_count' => $paidHolidays,
+                'paid_days_count' => $timeLogs + $paidHolidays,
+                'holidays' => $holidays,
                 'pending' => $pending,
                 'status' => $hasBlocker ? 'blocked' : (count($issues) ? 'warning' : 'ready'),
                 'issues' => $issues,
@@ -341,6 +374,19 @@ class PayrollReadinessController extends Controller
 
         $hasPeriodBlocker = collect($periodIssues)->contains('severity', 'blocker');
 
+        // Holidays in this cut-off, for the period summary
+        $periodHolidays = $holidayContext['holidays']
+            ->map(fn ($onDate, $date) => [
+                'date' => $date,
+                'holidays' => $onDate->map(fn ($h) => [
+                    'id' => (int) $h->holiday_id,
+                    'name' => $h->holiday_name,
+                    'type' => $h->type_name,
+                ])->values(),
+            ])
+            ->sortKeys()
+            ->values();
+
         return response()->json([
             'success' => true,
             'message' => 'Payroll readiness checked successfully.',
@@ -355,6 +401,7 @@ class PayrollReadinessController extends Controller
                     'status' => $period->status,
                 ],
                 'period_issues' => $periodIssues,
+                'period_holidays' => $periodHolidays,
                 'stats' => $stats,
                 'groups' => $groups,
                 'employees' => $rows,

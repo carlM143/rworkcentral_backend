@@ -31,17 +31,6 @@ class EmployeeTimeLogCorrectionSeeder extends Seeder
                 'status' => 'Complete',
             ],
             [
-                'work_date' => '2026-11-02',
-                'time_in' => '09:00:00',
-                'time_out' => '17:00:00',
-                'break_out' => '12:00:00',
-                'break_in' => '13:00:00',
-                'scheduled_time_in' => '09:00:00',
-                'scheduled_time_out' => '17:00:00',
-                'worked_minutes' => 420,
-                'status' => 'Complete',
-            ],
-            [
                 'work_date' => '2026-11-03',
                 'time_in' => null, // Missing Time In
                 'time_out' => '17:00:00',

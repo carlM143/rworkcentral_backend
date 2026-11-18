@@ -14,6 +14,14 @@ class TimeLogSeeder extends Seeder
     private const START_DATE = '2026-10-26';
     private const END_DATE = '2026-11-17';
 
+    /**
+     * Dates nobody worked (e.g. a non-working holiday), so no time logs are created.
+     * Nov 2, 2026 — All Souls' Day.
+     */
+    private const NO_WORK_DATES = [
+        '2026-11-02',
+    ];
+
     private const BREAK_START = '12:00';
     private const BREAK_END = '13:00';
 
@@ -36,6 +44,13 @@ class TimeLogSeeder extends Seeder
 
         $dates = collect(CarbonPeriod::create(self::START_DATE, '1 day', self::END_DATE))->values();
 
+        // Remove seeded logs left on no-work dates from an earlier run
+        $removed = TimeLog::query()
+            ->whereIn('employee_id', $employees->pluck('id'))
+            ->whereIn('work_date', self::NO_WORK_DATES)
+            ->where('remarks', 'Sample attendance for payroll testing.')
+            ->delete();
+
         $created = 0;
         $updated = 0;
 
@@ -55,6 +70,10 @@ class TimeLogSeeder extends Seeder
             $grace = (int) ($schedule->grace_period ?? 0);
 
             foreach ($dates as $dayIndex => $date) {
+                if (in_array($date->toDateString(), self::NO_WORK_DATES, true)) {
+                    continue;
+                }
+
                 $day = $days->get($date->format('l'));
 
                 if (!$day || !$day->is_working_day || !$day->time_in || !$day->time_out) {
@@ -90,8 +109,11 @@ class TimeLogSeeder extends Seeder
         }
 
         $range = self::START_DATE . ' to ' . self::END_DATE;
+        $skipped = implode(', ', self::NO_WORK_DATES);
 
-        $this->command?->info("Time logs seeded ({$range}): {$created} created, {$updated} updated.");
+        $this->command?->info(
+            "Time logs seeded ({$range}, no logs on {$skipped}): {$created} created, {$updated} updated, {$removed} removed."
+        );
     }
 
     private function scenario(int $employeeIndex, int $dayIndex): string

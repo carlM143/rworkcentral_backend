@@ -75,6 +75,17 @@ class PayslipController extends Controller
             : str_repeat('•', strlen($number) - 4) . substr($number, -4);
     }
 
+    /** "All Souls' Day (Nov 2), Rizal Day (Dec 30)" from holiday lines. */
+    private function holidayNote(array $items, string $dateKey): ?string
+    {
+        $note = collect($items)
+            ->map(fn ($h) => ($h['holiday_name'] ?? 'Holiday') . ' (' . date('M j', strtotime((string) $h[$dateKey])) . ')')
+            ->unique()
+            ->join(', ');
+
+        return $note !== '' ? $note : null;
+    }
+
     // GET /api/admin/payslips?payroll_period_id=1
     public function index(Request $request): JsonResponse
     {
@@ -137,7 +148,8 @@ class PayslipController extends Controller
         ]);
 
         $company = Company::query()->find($period->company_id);
-        $rateType = $payroll->breakdown['rate_type'] ?? 'monthly';
+        $breakdown = $payroll->breakdown ?? [];
+        $rateType = $breakdown['rate_type'] ?? 'monthly';
 
         // Earnings
         $basicNote = match ($rateType) {
@@ -154,7 +166,33 @@ class PayslipController extends Controller
             (float) $payroll->overtime_pay > 0
                 ? ['label' => 'Overtime', 'note' => $this->minutesLabel((int) $payroll->overtime_minutes), 'amount' => (float) $payroll->overtime_pay]
                 : null,
+            (float) $payroll->holiday_pay > 0
+                ? [
+                    'label' => 'Holiday Pay',
+                    'note' => $this->holidayNote($breakdown['holidays'] ?? [], 'holiday_date'),
+                    'amount' => (float) $payroll->holiday_pay,
+                ]
+                : null,
         ]));
+
+        // Holidays the employee was not paid for (monthly salary is reduced for these)
+        $unpaidHolidays = collect($breakdown['holiday_days'] ?? [])
+            ->filter(fn ($d) => empty($d['worked']) && empty($d['paid']) && empty($d['rest_day']))
+            ->all();
+
+        // Day count: days worked + holidays paid without working
+        $paidHolidayDays = collect($breakdown['holiday_days'] ?? [])
+            ->filter(fn ($d) => empty($d['worked']) && !empty($d['paid']))
+            ->count();
+
+        $daysWorked = (float) $payroll->days_worked;
+
+        $days = [
+            'worked' => $daysWorked,
+            'paid_holidays' => $paidHolidayDays,
+            'unpaid_leave' => (float) $payroll->unpaid_leave_days,
+            'total_paid' => $daysWorked + $paidHolidayDays,
+        ];
 
         // Less: time not worked
         $timeDeductions = array_values(array_filter([
@@ -166,6 +204,13 @@ class PayslipController extends Controller
                 : null,
             (float) $payroll->unpaid_leave_deduction > 0
                 ? ['label' => 'Unpaid Leave', 'note' => (float) $payroll->unpaid_leave_days . ' day(s)', 'amount' => (float) $payroll->unpaid_leave_deduction]
+                : null,
+            (float) $payroll->unpaid_holiday_deduction > 0
+                ? [
+                    'label' => 'Unpaid Holiday',
+                    'note' => $this->holidayNote($unpaidHolidays, 'date'),
+                    'amount' => (float) $payroll->unpaid_holiday_deduction,
+                ]
                 : null,
         ]));
 
@@ -186,7 +231,7 @@ class PayslipController extends Controller
             'amount' => (float) $payroll->withholding_tax,
         ];
 
-        foreach ($payroll->breakdown['loans'] ?? [] as $loan) {
+        foreach ($breakdown['loans'] ?? [] as $loan) {
             $deductions[] = [
                 'label' => $loan['loan_type'] ?? 'Loan',
                 'note' => trim(($loan['reference'] ?? '') . ' · balance ₱' . number_format((float) ($loan['balance_after'] ?? 0), 2), ' ·'),
@@ -221,6 +266,7 @@ class PayslipController extends Controller
                     'salary_type' => $payroll->salaryType?->type_name,
                     'basic_salary' => (float) $payroll->basic_salary,
                 ],
+                'days' => $days,
                 'earnings' => $earnings,
                 'time_deductions' => $timeDeductions,
                 'deductions' => $deductions,

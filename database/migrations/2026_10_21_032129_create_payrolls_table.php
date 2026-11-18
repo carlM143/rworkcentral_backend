@@ -43,6 +43,8 @@ return new class extends Migration
             $table->decimal('unpaid_leave_deduction', 12, 2)->default(0);
 
             $table->decimal('holiday_pay', 12, 2)->default(0);
+            $table->decimal('unpaid_holiday_days', 5, 2)->default(0);
+            $table->decimal('unpaid_holiday_deduction', 12, 2)->default(0);
 
             $table->decimal('gross_pay', 12, 2)->default(0);
             $table->decimal('contributions_total', 12, 2)->default(0);

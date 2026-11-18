@@ -15,7 +15,7 @@ return new class extends Migration
             $table->foreignId('payroll_id')->constrained('payrolls')->cascadeOnDelete();
             $table->foreignId('employee_id')->constrained('employees')->restrictOnDelete();
             $table->foreignId('holiday_id')->constrained('holidays')->restrictOnDelete();
-            $table->foreignId('holiday_pay_rule_id')->constrained('holiday_pay_rules')->restrictOnDelete();
+            $table->foreignId('holiday_pay_rule_id')->nullable()->constrained('holiday_pay_rules')->nullOnDelete();
             $table->foreignId('time_log_id')->nullable()->constrained('time_logs')->nullOnDelete();
 
             $table->date('holiday_date');

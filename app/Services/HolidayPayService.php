@@ -9,29 +9,32 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Computes holiday pay premiums for payroll generation.
+ * Holiday pay for payroll generation and payroll readiness.
  *
- * Basic pay already covers a normal day (100%), so the amount stored is only
- * the extra on top of it:
- *  - worked holiday:    minute rate × worked minutes (max 8h) × (rate% − 100%)
- *  - rest day worked:   minute rate × worked minutes (max 8h) × rate%
- *                       (a rest day is not in basic pay, so nothing to subtract)
- *  - holiday overtime:  minute rate × OT minutes × (OT rate% − 125%)  (125% is already in overtime pay)
- *  - unworked holiday:  daily rate × rate%  (daily-paid only, per the seeded rules)
- *
- * Who is paid comes from holidays.employee_coverage (set on the Holiday Coverage page):
+ * Who is paid comes from Holiday Coverage (holidays.employee_coverage):
  *  - all    : everyone in the holiday's locations
  *  - only   : only the selected employees, and only inside the holiday's locations
- *  - except : (legacy) everyone in the locations minus the selected employees;
- *             the Coverage page re-saves these as "only"
+ *  - except : (legacy) everyone in the locations minus the selected employees
+ *
+ * A covered employee who did not work the holiday is paid for it:
+ *  - rate = the "unworked" pay rule for the holiday type, or 100% when there is none
+ *    (covering the employee on the Coverage page is the company's decision to pay)
+ *  - daily-paid: the amount is added as holiday pay
+ *  - monthly-paid: the monthly salary already includes the day, so nothing is added
+ *
+ * A covered employee who worked gets only the premium above what basic pay / overtime already pay:
+ *  - worked holiday:    minute rate × worked minutes (max 8h) × (rate% − 100%)
+ *  - rest day worked:   minute rate × worked minutes (max 8h) × rate%
+ *  - holiday overtime:  minute rate × OT minutes × (OT rate% − 125%)
  */
 class HolidayPayService
 {
     private const MINUTES_PER_DAY = 480;
     private const REGULAR_OT_MULTIPLIER = 1.25;
+    private const DEFAULT_UNWORKED_RATE = 100.0;
 
     // When two holidays fall on the same date, the higher-paying type wins.
-    // Keys are lower-case; type codes are lower-cased before the lookup (DB codes are upper-case).
+    // Keys are lower-case; type codes are lower-cased before the lookup.
     private const TYPE_PRIORITY = [
         'double' => 4,
         'regular' => 3,
@@ -40,6 +43,22 @@ class HolidayPayService
         'special_working' => 1,
         'company' => 1,
     ];
+
+    /** Same salary type rule as PayrollGenerationService. */
+    public static function rateType(?string $typeName): string
+    {
+        $name = strtolower((string) $typeName);
+
+        if (str_contains($name, 'hour')) {
+            return 'hourly';
+        }
+
+        if (str_contains($name, 'daily') || str_contains($name, 'day')) {
+            return 'daily';
+        }
+
+        return 'monthly';
+    }
 
     /**
      * Load everything needed for one payroll period in a few queries.
@@ -60,6 +79,7 @@ class HolidayPayService
                 'holidays.holiday_type_id',
                 'holidays.employee_coverage as policy',
                 'holiday_types.type_code',
+                'holiday_types.type_name',
                 'holiday_types.requires_prior_day_present',
                 "holiday_dates.{$dateColumn} as holiday_date",
             ]);
@@ -102,17 +122,15 @@ class HolidayPayService
             ->keyBy('employee_id');
 
         // Working weekdays per schedule
-        $timeColumn = collect(['time_in', 'start_time', 'start_at'])
-            ->first(fn ($c) => Schema::hasColumn('work_schedule_days', $c));
-
         $scheduleDays = DB::table('work_schedule_days')
             ->whereIn('work_schedule_id', $employments->pluck('work_schedule_id')->filter()->unique())
             ->get()
             ->groupBy('work_schedule_id')
             ->map(fn ($days) => $days
-                ->filter(fn ($d) => $timeColumn ? !empty($d->{$timeColumn}) : true)
+                ->filter(fn ($d) => (bool) ($d->is_working_day ?? true) && !empty($d->time_in ?? true))
                 ->pluck('day_of_week')
                 ->map(fn ($day) => strtolower((string) $day))
+                ->values()
                 ->all());
 
         // Days with a complete time log, from a week before the cut-off (for the prior-day rule)
@@ -140,7 +158,63 @@ class HolidayPayService
     }
 
     /**
-     * Holiday pay lines for one employee.
+     * How each holiday in the cut-off applies to one employee (used by Payroll Readiness and payroll).
+     *
+     * Each entry: date, holiday, type, covered, worked, rest_day, paid, reason.
+     * "paid" = the day counts as paid (worked, or covered and unworked on a working day).
+     */
+    public function daysFor(array $context, int $employeeId, Collection $logs): array
+    {
+        if ($context['holidays']->isEmpty()) {
+            return [];
+        }
+
+        $employment = $context['employments']->get($employeeId);
+        $locationId = $employment?->location_id ? (int) $employment->location_id : null;
+        $workingDays = $context['scheduleDays']->get($employment?->work_schedule_id, []);
+        $present = $context['presentDays']->get($employeeId, []);
+        $logsByDate = $logs->keyBy(fn ($log) => substr((string) $log->work_date, 0, 10));
+
+        $days = [];
+
+        foreach ($context['holidays'] as $date => $holidaysOnDate) {
+            $covered = $holidaysOnDate->filter(fn ($h) => $this->covers($h, $employeeId, $locationId));
+            $holiday = ($covered->isNotEmpty() ? $covered : $holidaysOnDate)
+                ->sortByDesc(fn ($h) => self::TYPE_PRIORITY[strtolower((string) $h->type_code)] ?? 0)
+                ->first();
+
+            $log = $logsByDate->get($date);
+            $worked = (bool) ($log && $log->time_in && $log->time_out);
+            $restDay = $this->isRestDay($date, $workingDays);
+            $isCovered = $covered->isNotEmpty();
+
+            [$paid, $reason] = match (true) {
+                $worked => [true, 'Worked'],
+                !$isCovered => [false, 'Not covered by this holiday'],
+                $restDay => [false, 'Falls on a rest day'],
+                $holiday->requires_prior_day_present && !$this->presentBefore($date, $present, $workingDays)
+                    => [false, 'Absent on the working day before'],
+                default => [true, 'Paid holiday'],
+            };
+
+            $days[] = [
+                'date' => $date,
+                'holiday_id' => (int) $holiday->holiday_id,
+                'holiday_name' => $holiday->holiday_name,
+                'type' => $holiday->type_name,
+                'covered' => $isCovered,
+                'worked' => $worked,
+                'rest_day' => $restDay,
+                'paid' => $paid,
+                'reason' => $reason,
+            ];
+        }
+
+        return $days;
+    }
+
+    /**
+     * Holiday pay lines for one employee (amounts added to gross pay).
      *
      * @param  Collection  $logs      the employee's time logs in the cut-off
      * @param  Collection  $overtime  the employee's approved OT requests in the cut-off
@@ -179,7 +253,7 @@ class HolidayPayService
                 continue;
             }
 
-            $isRestDay = $workingDays !== [] && !in_array(strtolower(Carbon::parse($date)->format('l')), $workingDays, true);
+            $isRestDay = $this->isRestDay($date, $workingDays);
 
             $log = $logsByDate->get($date);
             $worked = $log && $log->time_in && $log->time_out;
@@ -214,11 +288,11 @@ class HolidayPayService
                     }
                 }
 
-                $this->push($lines, $holiday, $rule, $date, $scenario, $log->id, $workedMinutes, $otMinutes, $dailyRate, $amount);
+                $this->push($lines, $holiday, $rule, (float) $rule->rate_percent, $date, $scenario, $log->id, $workedMinutes, $otMinutes, $dailyRate, $amount);
                 continue;
             }
 
-            // Unworked: only on a scheduled working day
+            // Unworked: only on a scheduled working day, and the prior-day rule when the type requires it
             if ($isRestDay) {
                 continue;
             }
@@ -227,15 +301,17 @@ class HolidayPayService
                 continue;
             }
 
-            $rule = $this->rule($context['rules'], $holiday->holiday_type_id, 'unworked', $salaryGroup, $date);
-
-            if (!$rule) {
+            // Monthly salary already includes the day
+            if ($rateType === 'monthly') {
                 continue;
             }
 
-            $amount = $dailyRate * (float) $rule->rate_percent / 100;
+            $rule = $this->rule($context['rules'], $holiday->holiday_type_id, 'unworked', $salaryGroup, $date);
+            $rate = $rule ? (float) $rule->rate_percent : self::DEFAULT_UNWORKED_RATE;
 
-            $this->push($lines, $holiday, $rule, $date, 'unworked', null, 0, 0, $dailyRate, $amount);
+            $amount = $dailyRate * $rate / 100;
+
+            $this->push($lines, $holiday, $rule, $rate, $date, 'unworked', null, 0, 0, $dailyRate, $amount);
         }
 
         return $lines;
@@ -252,6 +328,12 @@ class HolidayPayService
             'except' => $inLocation && !$picked,
             default => $inLocation,
         };
+    }
+
+    private function isRestDay(string $date, array $workingDays): bool
+    {
+        return $workingDays !== []
+            && !in_array(strtolower(Carbon::parse($date)->format('l')), $workingDays, true);
     }
 
     /** The most specific active rule for the date: daily_paid / monthly_paid before "all", then the latest start. */
@@ -279,9 +361,7 @@ class HolidayPayService
         $day = Carbon::parse($date)->subDay();
 
         for ($i = 0; $i < 7; $i++) {
-            $isWorkingDay = $workingDays === [] || in_array(strtolower($day->format('l')), $workingDays, true);
-
-            if ($isWorkingDay) {
+            if (!$this->isRestDay($day->toDateString(), $workingDays)) {
                 return isset($present[$day->toDateString()]);
             }
 
@@ -294,7 +374,8 @@ class HolidayPayService
     private function push(
         array &$lines,
         object $holiday,
-        HolidayPayRule $rule,
+        ?HolidayPayRule $rule,
+        float $ratePercent,
         string $date,
         string $scenario,
         ?int $timeLogId,
@@ -312,14 +393,14 @@ class HolidayPayService
         $lines[] = [
             'holiday_id' => (int) $holiday->holiday_id,
             'holiday_name' => $holiday->holiday_name,
-            'holiday_pay_rule_id' => $rule->id,
+            'holiday_pay_rule_id' => $rule?->id,
             'time_log_id' => $timeLogId,
             'holiday_date' => $date,
             'scenario' => $scenario,
             'worked_minutes' => $workedMinutes,
             'overtime_minutes' => $otMinutes,
             'daily_rate' => round($dailyRate, 2),
-            'rate_percent' => (float) $rule->rate_percent,
+            'rate_percent' => $ratePercent,
             'amount' => $amount,
         ];
     }

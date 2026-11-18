@@ -247,7 +247,7 @@ class PayrollGenerationService
 
                 $overtimePay = $overtimeMinutes * $minuteRate * self::OVERTIME_MULTIPLIER;
 
-                // Holiday pay: only the premium on top of basic pay / regular overtime
+                // Holiday pay: unworked covered holidays (daily-paid) and premiums on worked holidays
                 $holidayLines = $this->holidayPay->linesFor(
                     $holidayContext,
                     $employee->id,
@@ -260,8 +260,22 @@ class PayrollGenerationService
 
                 $holidayPay = round(collect($holidayLines)->sum('amount'), 2);
 
+                // How each holiday applies to this employee (same result as Payroll Readiness)
+                $holidayDays = $this->holidayPay->daysFor($holidayContext, $employee->id, $logs);
+
+                // Monthly salary includes every working day, so a holiday the employee is NOT paid for
+                // (not covered, or absent the working day before) is taken off. Daily-paid employees
+                // are simply not paid for days they did not work.
+                $unpaidHolidayDays = $rateType === 'monthly'
+                    ? collect($holidayDays)
+                        ->filter(fn ($day) => !$day['worked'] && !$day['paid'] && !$day['rest_day'])
+                        ->count()
+                    : 0;
+
+                $unpaidHolidayDeduction = $unpaidHolidayDays * $dailyRate;
+
                 $gross = max(0, $basicPay + $allowancePay + $overtimePay + $holidayPay
-                    - $lateDeduction - $undertimeDeduction - $leaveDeduction);
+                    - $lateDeduction - $undertimeDeduction - $leaveDeduction - $unpaidHolidayDeduction);
 
                 $contributions = $this->contributions(
                     $period,
@@ -333,6 +347,8 @@ class PayrollGenerationService
                     'unpaid_leave_days' => $leaveDays,
                     'unpaid_leave_deduction' => round($leaveDeduction, 2),
                     'holiday_pay' => $holidayPay,
+                    'unpaid_holiday_days' => $unpaidHolidayDays,
+                    'unpaid_holiday_deduction' => round($unpaidHolidayDeduction, 2),
                     'gross_pay' => round($gross, 2),
                     'contributions_total' => round($contributionsTotal, 2),
                     'loan_deductions_total' => round($loanTotal, 2),
@@ -346,6 +362,7 @@ class PayrollGenerationService
                         'minute_rate' => round($minuteRate, 4),
                         'loans' => $loanLines,
                         'holidays' => $holidayLines,
+                        'holiday_days' => $holidayDays,
                     ],
                     'generated_by' => $userId,
                     'generated_at' => now(),
@@ -451,17 +468,7 @@ class PayrollGenerationService
 
     private function rateType(?string $typeName): string
     {
-        $name = strtolower((string) $typeName);
-
-        if (str_contains($name, 'hour')) {
-            return 'hourly';
-        }
-
-        if (str_contains($name, 'daily') || str_contains($name, 'day')) {
-            return 'daily';
-        }
-
-        return 'monthly';
+        return HolidayPayService::rateType($typeName);
     }
 
     private function lateMinutes(TimeLog $log): int
