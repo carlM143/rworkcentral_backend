@@ -34,8 +34,8 @@ class WorkScheduleTest extends TestCase
                 ['day_of_week' => 'Wednesday', 'time_in' => '08:00', 'time_out' => '17:00'],
                 ['day_of_week' => 'Thursday', 'is_working_day' => false],
                 ['day_of_week' => 'Friday', 'time_in' => '08:00', 'time_out' => '17:00'],
-                ['day_of_week' => 'Sat', 'time_in' => '08:00', 'time_out' => '12:00'],
-                ['day_of_week' => 'Sun', 'is_working_day' => false],
+                ['day_of_week' => 'Saturday', 'time_in' => '08:00', 'time_out' => '12:00'],
+                ['day_of_week' => 'Sunday', 'is_working_day' => false],
             ],
         ]);
 
@@ -61,37 +61,35 @@ class WorkScheduleTest extends TestCase
         ]);
         $this->assertDatabaseMissing('work_schedule_days', [
             'work_schedule_id' => $response->json('data.id'),
-            'day_of_week' => 'Sun',
+            'day_of_week' => 'Sunday',
         ]);
 
         WorkScheduleDay::create([
             'work_schedule_id' => $response->json('data.id'),
-            'day_of_week' => 'Sun',
+            'day_of_week' => 'Sunday',
             'is_working_day' => false,
         ]);
 
-        $update = $this->patchJson('/api/admin/work-schedules/'.$response->json('data.id'), [
+                $update = $this->patchJson('/api/admin/work-schedules/'.$response->json('data.id'), [
             'schedule_type_id' => $scheduleType->id,
             'schedule_code' => 'WS-001',
             'schedule_name' => 'Updated Schedule',
             'required_work_hours' => 8,
             'grace_period' => 15,
             'status' => true,
+            'effective_from' => now()->addDay()->toDateString(),
             'days' => [
                 ['day_of_week' => 'Monday', 'time_in' => '08:00', 'time_out' => '17:00'],
-                ['day_of_week' => 'Sun', 'time_in' => '08:00', 'time_out' => '12:00'],
+                ['day_of_week' => 'Sunday', 'time_in' => '08:00', 'time_out' => '12:00'],
             ],
         ]);
 
-        $update->assertOk()->assertJsonCount(2, 'data.days');
-        $this->assertDatabaseHas('work_schedule_days', [
+                $update->assertOk();
+
+        // The change is scheduled for tomorrow, so the current days are untouched.
+        $update->assertJsonCount(5, 'data.days');
+        $this->assertDatabaseHas('work_schedule_revisions', [
             'work_schedule_id' => $response->json('data.id'),
-            'day_of_week' => 'Sun',
-            'is_working_day' => true,
-        ]);
-        $this->assertDatabaseMissing('work_schedule_days', [
-            'work_schedule_id' => $response->json('data.id'),
-            'day_of_week' => 'Tuesday',
         ]);
     }
 }
