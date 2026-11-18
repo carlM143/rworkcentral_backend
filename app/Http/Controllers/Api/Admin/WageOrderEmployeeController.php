@@ -13,6 +13,18 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Apply a wage order to employees.
+ *
+ * Lists the active employees working in the wage order's region (by the
+ * location of their latest employment). Employees earning less than the new
+ * minimum come first and are the priority; HR / admin choose who to include
+ * and how much. Each chosen employee gets a pending Salary Adjustment that
+ * goes through the usual approve → apply flow before payroll uses it.
+ *
+ *   GET  /admin/wage-orders/{wageOrder}/employees?department_id=&location_id=&search=
+ *   POST /admin/wage-orders/{wageOrder}/apply
+ */
 class WageOrderEmployeeController extends Controller
 {
     public function index(Request $request, WageOrder $wageOrder): JsonResponse
@@ -148,8 +160,11 @@ class WageOrderEmployeeController extends Controller
     /**
      * @return Collection<int, array<string, mixed>>
      */
+    private ?int $currentOrderId = null;
+
     private function employees(WageOrder $wageOrder): Collection
     {
+        $this->currentOrderId = $wageOrder->id;
         $wageOrder->loadMissing('rates');
         $rates = $wageOrder->rates->keyBy('classification');
 
@@ -186,9 +201,20 @@ class WageOrderEmployeeController extends Controller
 
         // Open adjustments block a new one (one pending/approved per employee).
         $open = SalaryAdjustment::query()
-            ->whereIn('employee_id', $employeeIds)
-            ->whereIn('status', ['pending', 'approved'])
-            ->get(['id', 'employee_id', 'status', 'wage_order_id'])
+            ->leftJoin('wage_orders', 'wage_orders.id', '=', 'salary_adjustments.wage_order_id')
+            ->whereIn('salary_adjustments.employee_id', $employeeIds)
+            ->whereIn('salary_adjustments.status', ['pending', 'approved'])
+            ->get([
+                'salary_adjustments.id',
+                'salary_adjustments.employee_id',
+                'salary_adjustments.status',
+                'salary_adjustments.adjustment_type',
+                'salary_adjustments.wage_order_id',
+                'salary_adjustments.previous_basic_salary',
+                'salary_adjustments.new_basic_salary',
+                'salary_adjustments.effective_date',
+                'wage_orders.order_no',
+            ])
             ->keyBy('employee_id');
 
         // Already included in this wage order (any status except rejected).
@@ -257,6 +283,20 @@ class WageOrderEmployeeController extends Controller
                 'suggested_salary' => $suggested,
                 'included' => isset($included[$r->employee_id]) ? $included[$r->employee_id]->id : null,
                 'blocked_reason' => $blocked,
+                // The adjustment that blocks this employee, so HR can review or delete it here.
+                'blocking' => isset($open[$r->employee_id]) ? [
+                    'id' => $open[$r->employee_id]->id,
+                    'status' => $open[$r->employee_id]->status,
+                    'type' => $open[$r->employee_id]->adjustment_type,
+                    'source' => $open[$r->employee_id]->wage_order_id ? 'wage_order' : 'manual',
+                    'order_no' => $open[$r->employee_id]->order_no,
+                    'this_order' => (int) $open[$r->employee_id]->wage_order_id === (int) $this->currentOrderId,
+                    'previous_salary' => (float) $open[$r->employee_id]->previous_basic_salary,
+                    'new_salary' => (float) $open[$r->employee_id]->new_basic_salary,
+                    'effective_date' => $open[$r->employee_id]->effective_date instanceof \DateTimeInterface
+                        ? $open[$r->employee_id]->effective_date->format('Y-m-d')
+                        : (string) $open[$r->employee_id]->effective_date,
+                ] : null,
             ];
         })
             // Priority (below minimum, biggest shortfall) first.
