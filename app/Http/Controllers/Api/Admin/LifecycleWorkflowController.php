@@ -43,13 +43,57 @@ class LifecycleWorkflowController extends Controller
     public function employees(Request $request)
     {
         $this->authorizeAdmin($request);
-        return response()->json(['data' => Employee::with($this->employeeRelations())->orderBy('lastname')->get()->map(fn ($e) => $this->employeeData($e))]);
+        $employees = Employee::with($this->employeeRelations())->orderBy('lastname')->orderBy('firstname')->orderBy('id')->get();
+
+        if (!$request->boolean('lifecycle_activity')) {
+            return response()->json(['data' => $employees->map(fn ($employee) => $this->employeeData($employee))]);
+        }
+
+        // Only use events that appear in the timeline: newly generated pending
+        // milestones and policy recalculations are not employee activity.
+        $activity = collect();
+        foreach ([
+            ['lifecycle_employment_type_changes', 'created_at', false],
+            ['employee_lifecycle_milestones', 'updated_at', true],
+            ['employee_offboardings', 'updated_at', false],
+        ] as [$table, $column, $completedOnly]) {
+            $query = DB::table($table)->select('employee_id')->selectRaw("MAX({$column}) as latest_activity")
+                ->groupBy('employee_id');
+            if ($completedOnly) $query->where('status', 'completed');
+            foreach ($query->get() as $row) {
+                if ($row->latest_activity === null) continue;
+                if (!isset($activity[$row->employee_id]) || $row->latest_activity > $activity[$row->employee_id]) {
+                    $activity[$row->employee_id] = $row->latest_activity;
+                }
+            }
+        }
+
+        $data = $employees->map(fn ($employee) => [
+            ...$this->employeeData($employee),
+            'lastLifecycleActivityAt' => $activity[$employee->id] ?? null,
+        ])->sort(function ($a, $b) {
+            if ($a['lastLifecycleActivityAt'] !== $b['lastLifecycleActivityAt']) {
+                if ($a['lastLifecycleActivityAt'] === null) return 1;
+                if ($b['lastLifecycleActivityAt'] === null) return -1;
+                return strcmp($b['lastLifecycleActivityAt'], $a['lastLifecycleActivityAt']);
+            }
+
+            return strcasecmp($a['employeeName'], $b['employeeName']) ?: $a['employeeId'] <=> $b['employeeId'];
+        })->values();
+
+        return response()->json(['data' => $data]);
     }
 
     private function formatMilestone(EmployeeLifecycleMilestone $m): array
     {
+        $stage = $m->lifecycleStage;
+        $employee = $this->employeeData($m->employee);
+        $hireDate = $m->employee->latestEmployment?->date_hired;
+        $showWindow = $stage->end_month_after_hire !== null
+            && (!$stage->is_managed_regularization || $employee['employmentType'] === 'Probationary');
+
         return [
-            ...$this->employeeData($m->employee),
+            ...$employee,
             'id' => $m->id,
             'lifecycleStageId' => $m->lifecycle_stage_id,
             'requiresAttachment' => $m->lifecycleStage->requires_attachment,
@@ -57,6 +101,8 @@ class LifecycleWorkflowController extends Controller
             'stageCode' => $m->lifecycleStage->stage_code,
             'policyName' => $m->lifecycleStage->lifecyclePolicy->name,
             'dueDate' => $m->due_date?->format('Y-m-d'),
+            'reviewWindowStart' => $showWindow ? $hireDate?->copy()->addMonthsNoOverflow($stage->months_after_hire)->toDateString() : null,
+            'reviewWindowEnd' => $showWindow ? $hireDate?->copy()->addMonthsNoOverflow($stage->end_month_after_hire)->toDateString() : null,
             'status' => $m->status,
             'remarks' => $m->remarks,
             'evaluationDocumentId' => $m->evaluation_document_id,
@@ -74,18 +120,23 @@ class LifecycleWorkflowController extends Controller
         $today = now()->startOfDay()->toDateString();
         $dueSoonEnd = now()->startOfDay()->addDays(30)->toDateString();
 
+        // Keep legacy reviews in employee history, not in the active listing.
+        $visible = EmployeeLifecycleMilestone::whereDoesntHave('lifecycleStage', fn ($stage) => $stage
+            ->whereIn('stage_code', EmployeeLifecycleStage::RETIRED_REGULARIZATION_CODES)
+            ->whereHas('lifecyclePolicy.regularizationStage'));
+
         $stats = [
-            'total' => EmployeeLifecycleMilestone::count(),
-            'completed' => EmployeeLifecycleMilestone::where('status', 'completed')->count(),
-            'pending' => EmployeeLifecycleMilestone::where('status', 'pending')->count(),
-            'overdue' => EmployeeLifecycleMilestone::where('status', 'pending')
+            'total' => (clone $visible)->count(),
+            'completed' => (clone $visible)->where('status', 'completed')->count(),
+            'pending' => (clone $visible)->where('status', 'pending')->count(),
+            'overdue' => (clone $visible)->where('status', 'pending')
                 ->whereDate('due_date', '<', $today)
                 ->count(),
-            'dueSoon' => EmployeeLifecycleMilestone::where('status', 'pending')
+            'dueSoon' => (clone $visible)->where('status', 'pending')
                 ->whereDate('due_date', '>=', $today)
                 ->whereDate('due_date', '<=', $dueSoonEnd)
                 ->count(),
-            'probationaryUpcoming' => EmployeeLifecycleMilestone::whereHas('lifecycleStage', fn ($q) => $q->where('stage_code', 'M6_REGULARIZATION'))
+            'probationaryUpcoming' => (clone $visible)->whereHas('lifecycleStage', fn ($q) => $q->where('is_managed_regularization', true))
                 ->whereHas('employee.latestEmployment.employmentType', fn ($q) => $q->where('name', 'Probationary'))
                 ->count(),
         ];
@@ -93,7 +144,7 @@ class LifecycleWorkflowController extends Controller
         $departments = \App\Models\Department::orderBy('department_name')->pluck('department_name')->values();
 
         $relations = array_map(fn ($r) => 'employee.'.$r, $this->employeeRelations());
-        $query = EmployeeLifecycleMilestone::with([...$relations, 'lifecycleStage.lifecyclePolicy', 'evaluationDocument']);
+        $query = $visible->with([...$relations, 'lifecycleStage.lifecyclePolicy', 'evaluationDocument']);
 
         if ($search = trim((string) $request->query('search', ''))) {
             $query->where(function ($q) use ($search) {
@@ -180,6 +231,20 @@ class LifecycleWorkflowController extends Controller
     {
         $this->authorizeAdmin($request);
         $employee->load($this->employeeRelations());
+        app(\App\Services\LifecycleMilestoneSync::class)->syncEmployee($employee);
+        $employmentTypeId = $employee->latestEmployment?->employment_type_id;
+        $pendingMilestones = $employee->lifecycleMilestones()
+            ->where('status', 'pending')
+            ->whereDoesntHave('lifecycleStage', fn ($stage) => $stage
+                ->whereIn('stage_code', EmployeeLifecycleStage::RETIRED_REGULARIZATION_CODES)
+                ->whereHas('lifecyclePolicy.regularizationStage'))
+            ->whereHas('lifecycleStage', fn ($stage) => $stage->where('status', true)
+                ->whereHas('lifecyclePolicy', fn ($policy) => $policy->where('status', true)
+                    ->where(fn ($covered) => $covered->whereNull('employment_type_id')->orWhere('employment_type_id', $employmentTypeId))))
+            ->with(['lifecycleStage.lifecyclePolicy', 'evaluationDocument'])
+            ->orderBy('due_date')->orderBy('id')->get()
+            ->map(fn ($milestone) => $this->formatMilestone($milestone->setRelation('employee', $employee)));
+
         $changes = DB::table('lifecycle_employment_type_changes as changes')
             ->join('users', 'users.id', '=', 'changes.changed_by')
             ->where('changes.employee_id', $employee->id)->orderBy('changes.id')
@@ -192,7 +257,8 @@ class LifecycleWorkflowController extends Controller
                 'id' => 'employment-'.$employment->id, 'category' => 'Employment',
                 'title' => 'Employment record — '.$initialType,
                 'date' => $employment->date_hired?->format('Y-m-d') ?? $employment->created_at?->toISOString(),
-                'description' => 'Hire date recorded for this employment. Type is based on the earliest available change history or the saved employment record.',
+                'dateLabel' => $employment->date_hired ? 'Hire date' : 'Recorded',
+                'description' => null,
                 'actor' => null, 'status' => $initialType,
             ]);
         }
@@ -200,7 +266,8 @@ class LifecycleWorkflowController extends Controller
             $events->push([
                 'id' => 'type-change-'.$change->id, 'category' => 'Employment Type Change',
                 'title' => $change->previous_type_name.' → '.$change->new_type_name,
-                'date' => $change->created_at, 'description' => $change->reason,
+                'date' => $change->effective_date ?? $change->created_at, 'description' => $change->reason,
+                'dateLabel' => $change->effective_date ? 'Effective date' : 'Recorded',
                 'actor' => $change->changed_by_name, 'status' => $change->new_type_name,
             ]);
         }
@@ -209,9 +276,12 @@ class LifecycleWorkflowController extends Controller
                 'id' => 'milestone-'.$milestone->id, 'category' => 'Milestone',
                 'title' => $milestone->lifecycleStage->stage_name,
                 'date' => $milestone->updated_at?->toISOString(),
-                'description' => $milestone->remarks ?: 'Milestone completed. Date shown is the latest saved update.',
+                'dateLabel' => 'Last updated',
+                'dueDate' => $milestone->due_date?->toDateString(),
+                'description' => $milestone->remarks,
                 'actor' => null, 'status' => 'Completed',
                 'attachmentName' => $milestone->evaluationDocument?->original_name,
+                'evaluationDocumentId' => $milestone->evaluation_document_id,
             ]);
         }
         foreach (EmployeeOffboarding::with('user')->where('employee_id', $employee->id)->get() as $offboarding) {
@@ -233,6 +303,7 @@ class LifecycleWorkflowController extends Controller
         }
         return response()->json(['data' => [
             'employee' => $this->employeeData($employee),
+            'pendingMilestones' => $pendingMilestones,
             'events' => $events->sortBy(fn ($event) => $event['date'] ? \Carbon\Carbon::parse($event['date'])->timestamp : 0)->values(),
         ]]);
     }
@@ -244,9 +315,15 @@ class LifecycleWorkflowController extends Controller
             'employment_id' => ['required', 'integer'],
             'previous_type_id' => ['required', 'integer'],
             'employment_type_id' => ['required', 'integer', 'exists:employment_types,id'],
-            'reason' => ['required', 'string', 'max:5000'],
+            'effective_date' => ['required', 'date_format:Y-m-d'],
+            'reason' => ['nullable', 'string', 'max:5000'],
+            'evaluation' => ['sometimes', 'required', 'array:milestone_id,evaluation_document_id,status,remarks'],
+            'evaluation.milestone_id' => ['required_with:evaluation', 'integer'],
+            'evaluation.evaluation_document_id' => ['present_with:evaluation', 'nullable', 'integer', Rule::exists('lifecycle_evaluation_documents', 'id')->where('employee_id', $employee->id)],
+            'evaluation.status' => ['required_with:evaluation', Rule::in(['pending', 'completed'])],
+            'evaluation.remarks' => ['nullable', 'string', 'max:5000'],
         ]);
-        DB::transaction(function () use ($employee, $data, $request) {
+        $employee = DB::transaction(function () use ($employee, $data, $request) {
             Employee::whereKey($employee->id)->lockForUpdate()->firstOrFail();
             $employment = $employee->employments()->latest('id')->lockForUpdate()->first();
             if (!$employment) throw ValidationException::withMessages(['employment_id' => 'Create an employment record for this employee first.']);
@@ -257,21 +334,52 @@ class LifecycleWorkflowController extends Controller
                 throw ValidationException::withMessages(['employment_type_id' => 'Select a different employment type.']);
             }
             $newType = \App\Models\EmploymentType::findOrFail($data['employment_type_id']);
+            if (isset($data['evaluation'])) {
+                $evaluation = $data['evaluation'];
+                $milestone = $employee->lifecycleMilestones()->with('lifecycleStage')
+                    ->whereKey($evaluation['milestone_id'])->lockForUpdate()->first();
+                if (!$milestone) {
+                    throw ValidationException::withMessages(['evaluation.milestone_id' => 'Select a milestone that belongs to this employee.']);
+                }
+                $requiresAttachment = $milestone->lifecycleStage->requires_attachment;
+                if ($requiresAttachment && !$evaluation['evaluation_document_id']) {
+                    throw ValidationException::withMessages(['evaluation.evaluation_document_id' => 'Attach the required evaluation proof before saving the employment type.']);
+                }
+                $milestone->update([
+                    'remarks' => $evaluation['remarks'] ?? null,
+                    'evaluation_document_id' => $evaluation['evaluation_document_id'],
+                    'status' => $requiresAttachment ? 'completed' : $evaluation['status'],
+                ]);
+            }
+
+            if ($employment->employmentType?->name === 'Probationary' && $newType->name === 'Regular') {
+                $requiredReview = EmployeeLifecycleStage::where('is_managed_regularization', true)
+                    ->where('status', true)->where('requires_attachment', true)
+                    ->whereHas('lifecyclePolicy', fn ($policy) => $policy->where('status', true)
+                        ->where('employment_type_id', $employment->employment_type_id))
+                    ->first();
+                if ($requiredReview && !$employee->lifecycleMilestones()
+                    ->where('lifecycle_stage_id', $requiredReview->id)
+                    ->where('status', 'completed')->whereNotNull('evaluation_document_id')->exists()) {
+                    throw ValidationException::withMessages(['evaluation' => 'Open Change Type from the regularization milestone and attach evaluation proof before saving.']);
+                }
+            }
+
             DB::table('lifecycle_employment_type_changes')->insert([
                 'employee_id' => $employee->id, 'employment_id' => $employment->id,
                 'changed_by' => $request->user()->id, 'previous_type_id' => $employment->employment_type_id,
                 'new_type_id' => $newType->id, 'previous_type_name' => $employment->employmentType->name,
-                'new_type_name' => $newType->name, 'reason' => $data['reason'],
+                'new_type_name' => $newType->name, 'reason' => $data['reason'] ?? '',
+                'effective_date' => $data['effective_date'],
                 'created_at' => now(), 'updated_at' => now(),
             ]);
             $employment->update(['employment_type_id' => $newType->id]);
+
+            $employee = $employee->fresh($this->employeeRelations());
+            app(\App\Services\LifecycleMilestoneSync::class)->syncEmployee($employee);
+
+            return $employee;
         });
-
-        $employee = $employee->fresh($this->employeeRelations());
-
-        // Rebuild the milestone plan from the hire date and the stages of the
-        // policy attached to the new employment type.
-        app(\App\Services\LifecycleMilestoneSync::class)->syncEmployee($employee);
 
         return response()->json(['data' => $this->employeeData($employee)]);
     }
