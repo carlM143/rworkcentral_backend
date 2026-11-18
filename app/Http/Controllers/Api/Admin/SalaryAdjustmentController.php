@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SalaryAdjustment;
 use App\Models\SalaryAdjustmentAllowance;
 use App\Models\SalarySetup;
+use App\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -27,10 +28,15 @@ class SalaryAdjustmentController extends Controller
     // GET ALL SALARY ADJUSTMENTS
     // ==========================================
 
+    /**
+     * Manual adjustments only. Adjustments created from a wage order are
+     * listed in Compensation › Wage Adjustments (WageAdjustmentController).
+     */
     public function index(): JsonResponse
     {
         $adjustments = SalaryAdjustment::query()
             ->with(self::RELATIONS)
+            ->whereNull('wage_order_id')
             ->latest('id')
             ->get();
 
@@ -82,15 +88,16 @@ class SalaryAdjustmentController extends Controller
             }
 
             // Avoid conflicting outstanding adjustments.
-            $hasOpenAdjustment = SalaryAdjustment::query()
+            $openAdjustment = SalaryAdjustment::query()
                 ->where('salary_setup_id', $salarySetup->id)
                 ->whereIn('status', ['pending', 'approved'])
-                ->exists();
+                ->first(['id', 'wage_order_id']);
 
-            if ($hasOpenAdjustment) {
+            if ($openAdjustment) {
                 throw ValidationException::withMessages([
-                    'salary_setup_id' =>
-                        'This employee already has a pending or approved salary adjustment.',
+                    'salary_setup_id' => $openAdjustment->wage_order_id
+                        ? 'This employee has a pending or approved wage order increase. Finish it in Compensation › Wage Adjustments first.'
+                        : 'This employee already has a pending or approved salary adjustment.',
                 ]);
             }
 
@@ -106,6 +113,14 @@ class SalaryAdjustmentController extends Controller
 
             return $adjustment;
         });
+
+        $this->notifyAdmins(
+            $adjustment,
+            'New salary adjustment',
+            '{name}: basic salary {old} → {new}, effective {date}. Waiting for approval.',
+            'info',
+            $request->user()?->id,
+        );
 
         return $this->respond(
             $adjustment,
@@ -128,28 +143,41 @@ class SalaryAdjustmentController extends Controller
     }
 
     // ==========================================
-    // EDIT PENDING SALARY ADJUSTMENT
+    // EDIT SALARY ADJUSTMENT (pending or approved)
     // ==========================================
 
+    /**
+     * An approved adjustment can still be edited (allowances change and
+     * end), but it goes back to pending so the new values are approved
+     * again before they reach the salary setup. Applied and rejected
+     * adjustments are final.
+     */
     public function update(
         Request $request,
         SalaryAdjustment $salaryAdjustment
     ): JsonResponse {
         $validated = $request->validate(
-            $this->rules(false),
+            $this->rules(false) + [
+                // true = `allowances` is the complete new list, so an
+                // empty list removes all additional allowances.
+                'replace_allowances' => ['sometimes', 'boolean'],
+            ],
             $this->messages()
         );
 
+        $replace = (bool) ($validated['replace_allowances'] ?? false);
+
         $adjustment = DB::transaction(function () use (
             $validated,
-            $salaryAdjustment
+            $salaryAdjustment,
+            $replace
         ) {
             $item = SalaryAdjustment::query()
                 ->lockForUpdate()
                 ->findOrFail($salaryAdjustment->id);
 
-            if ($item->status !== 'pending') {
-                abort(409, 'Only pending adjustments can be edited.');
+            if (!in_array($item->status, ['pending', 'approved'], true)) {
+                abort(409, 'Only pending or approved adjustments can be edited.');
             }
 
             $salarySetup = SalarySetup::query()
@@ -158,11 +186,18 @@ class SalaryAdjustmentController extends Controller
                 ->firstOrFail();
 
             // Previous values are refreshed from the current salary setup.
-            [$attributes, $newExtras] = $this->prepare($validated, $salarySetup);
+            [$attributes, $newExtras] = $this->prepare($validated, $salarySetup, $replace);
 
-            $item->update($attributes);
+            $item->update($attributes + [
+                'clears_allowances' => $replace && $newExtras->isEmpty(),
 
-            if (array_key_exists('allowances', $validated)) {
+                // Edited values need a new approval.
+                'status' => 'pending',
+                'approved_by' => null,
+                'approved_at' => null,
+            ]);
+
+            if ($replace || array_key_exists('allowances', $validated)) {
                 SalaryAdjustmentAllowance::query()
                     ->where('salary_adjustment_id', $item->id)
                     ->delete();
@@ -175,8 +210,40 @@ class SalaryAdjustmentController extends Controller
 
         return $this->respond(
             $adjustment,
-            'Salary adjustment updated successfully.'
+            $salaryAdjustment->status === 'approved'
+                ? 'Salary adjustment updated. It is pending again and needs a new approval.'
+                : 'Salary adjustment updated successfully.'
         );
+    }
+
+    // ==========================================
+    // DELETE SALARY ADJUSTMENT (not yet applied)
+    // ==========================================
+
+    public function destroy(
+        SalaryAdjustment $salaryAdjustment
+    ): JsonResponse {
+        DB::transaction(function () use ($salaryAdjustment) {
+            $item = SalaryAdjustment::query()
+                ->lockForUpdate()
+                ->findOrFail($salaryAdjustment->id);
+
+            if ($item->status === 'applied') {
+                abort(409, 'Applied adjustments are part of the salary history and cannot be deleted. File a new adjustment instead.');
+            }
+
+            SalaryAdjustmentAllowance::query()
+                ->where('salary_adjustment_id', $item->id)
+                ->delete();
+
+            $item->delete();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Salary adjustment deleted successfully.',
+            'data' => null,
+        ]);
     }
 
     // ==========================================
@@ -208,11 +275,47 @@ class SalaryAdjustmentController extends Controller
             return $item;
         });
 
+        $this->notifyAdmins(
+            $adjustment,
+            'Salary adjustment approved',
+            '{name}\'s salary adjustment was approved. It can be applied on {date}.',
+            'success',
+            $request->user()?->id,
+        );
+
         return $this->respond(
             $adjustment,
             'Salary adjustment approved successfully.'
         );
     }
+
+    public function bulk(Request $request): JsonResponse
+{
+    $validated = $request->validate([
+        'ids' => ['required', 'array', 'min:1'],
+        'ids.*' => ['integer', 'exists:salary_adjustments,id'],
+        'action' => ['required', 'string', Rule::in(['approve', 'reject', 'apply'])],
+        'rejection_reason' => ['nullable', 'string', 'max:500'],
+    ]);
+
+    $action = $validated['action'];
+    $adjustments = SalaryAdjustment::whereIn('id', $validated['ids'])->get();
+
+    foreach ($adjustments as $adjustment) {
+        if ($action === 'approve' && method_exists($this, 'approve')) {
+            $this->approve($request, $adjustment);
+        } elseif ($action === 'reject' && method_exists($this, 'reject')) {
+            $this->reject($request, $adjustment);
+        } elseif ($action === 'apply' && method_exists($this, 'apply')) {
+            $this->apply($request, $adjustment);
+        }
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Bulk action completed successfully.',
+    ]);
+}
 
     // ==========================================
     // REJECT SALARY ADJUSTMENT
@@ -238,6 +341,14 @@ class SalaryAdjustmentController extends Controller
 
             return $item;
         });
+
+        $this->notifyAdmins(
+            $adjustment,
+            'Salary adjustment rejected',
+            '{name}\'s salary adjustment ({old} → {new}) was rejected. The salary was not changed.',
+            'warning',
+            auth()->id(),
+        );
 
         return $this->respond(
             $adjustment,
@@ -316,6 +427,13 @@ class SalaryAdjustmentController extends Controller
                 ->orderBy('id')
                 ->get();
 
+            if ($extras->isEmpty() && $item->clears_allowances) {
+                // The adjustment ends all additional allowances.
+                DB::table('employee_allowance')
+                    ->where('salary_setup_id', $salarySetup->id)
+                    ->delete();
+            }
+
             if ($extras->isNotEmpty()) {
                 DB::table('employee_allowance')
                     ->where('salary_setup_id', $salarySetup->id)
@@ -340,9 +458,63 @@ class SalaryAdjustmentController extends Controller
             return $item;
         });
 
+        $this->notifyAdmins(
+            $adjustment,
+            'Salary adjustment applied',
+            '{name}\'s new basic salary of {new} is now in effect.',
+            'success',
+            $request->user()?->id,
+        );
+
+        app(NotificationService::class)->toEmployee(
+            employeeId: (int) $adjustment->employee_id,
+            category: 'salary',
+            title: 'Your salary was updated',
+            message: 'Your salary adjustment effective '.$adjustment->effective_date?->format('M j, Y').' has been applied.',
+            level: 'success',
+        );
+
         return $this->respond(
             $adjustment,
             'Salary adjustment applied successfully.'
+        );
+    }
+
+    // ==========================================
+    // NOTIFICATIONS
+    // ==========================================
+
+    /**
+     * {name}, {old}, {new} and {date} in the message are filled in.
+     */
+    private function notifyAdmins(
+        SalaryAdjustment $adjustment,
+        string $title,
+        string $message,
+        string $level,
+        ?int $exceptUserId
+    ): void {
+        $adjustment->loadMissing('employee:id,firstname,lastname');
+        $employee = $adjustment->employee;
+
+        $text = strtr($message, [
+            '{name}' => $employee ? trim($employee->firstname.' '.$employee->lastname) : 'An employee',
+            '{old}' => '₱'.number_format((float) $adjustment->previous_basic_salary, 2),
+            '{new}' => '₱'.number_format((float) $adjustment->new_basic_salary, 2),
+            '{date}' => $adjustment->effective_date?->format('M j, Y') ?? '—',
+        ]);
+
+        app(NotificationService::class)->toAdmins(
+            category: 'salary',
+            title: $title,
+            message: $text,
+            url: $adjustment->wage_order_id
+                ? '/admin/settings/compensation/wage-adjustments'
+                : '/admin/employees/salary-adjustments/'.$adjustment->id,
+            level: $level,
+            exceptUserId: $exceptUserId,
+            subjectType: 'salary_adjustment',
+            subjectId: $adjustment->id,
         );
     }
 
@@ -419,7 +591,7 @@ class SalaryAdjustmentController extends Controller
      *
      * @return array{0: array<string, mixed>, 1: Collection<int, array{allowance_name: string, amount: mixed}>}
      */
-    private function prepare(array $validated, SalarySetup $salarySetup): array
+    private function prepare(array $validated, SalarySetup $salarySetup, bool $replace = false): array
     {
         $oldAllowance = $salarySetup->allowance;
 
@@ -435,7 +607,9 @@ class SalaryAdjustmentController extends Controller
             ])
             ->values();
 
-        $hasExtras = $newExtras->isNotEmpty();
+        // With $replace the list is complete, so an empty list means
+        // "remove every additional allowance".
+        $hasExtras = $replace || $newExtras->isNotEmpty();
 
         $oldExtras = DB::table('employee_allowance')
             ->where('salary_setup_id', $salarySetup->id)
@@ -533,10 +707,24 @@ class SalaryAdjustmentController extends Controller
     ): JsonResponse {
         $adjustment->load(self::RELATIONS);
 
+        // The employee's additional allowances right now, so the detail
+        // page can compare them and prefill the edit form.
+        $current = DB::table('employee_allowance')
+            ->where('salary_setup_id', $adjustment->salary_setup_id)
+            ->orderBy('id')
+            ->get(['allowance_name', 'allowance'])
+            ->map(fn ($row) => [
+                'allowance_name' => $row->allowance_name,
+                'amount' => $this->normalizeMoney($row->allowance),
+            ])
+            ->values();
+
         return response()->json([
             'success' => true,
             'message' => $message,
-            'data' => $this->formatAdjustment($adjustment),
+            'data' => $this->formatAdjustment($adjustment) + [
+                'current_allowances' => $current,
+            ],
         ], $statusCode);
     }
 
@@ -589,6 +777,7 @@ class SalaryAdjustmentController extends Controller
 
             'allowances' => $allowanceList,
             'allowances_total' => number_format($allowancesTotal, 2, '.', ''),
+            'clears_allowances' => (bool) $item->clears_allowances,
 
             'effective_date' => $item->effective_date?->format('Y-m-d'),
             'reason' => $item->reason,

@@ -14,7 +14,10 @@ use App\Http\Controllers\Api\Admin\DashboardPayrollController;
 use App\Http\Controllers\Api\Admin\NotificationController;
 use App\Http\Controllers\Api\Admin\AccountController;
 use App\Http\Controllers\Api\Admin\WageOrderController;
+use App\Http\Controllers\Api\Admin\WageOrderEmployeeController;
+use App\Http\Controllers\Api\Admin\WageAdjustmentController;
 use App\Http\Controllers\Api\Admin\RegionalRateController;
+use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -84,12 +87,16 @@ Route::get('dashboard/headcount', [DashboardController::class, 'headcount']);
 
 Route::get('dashboard/pending-requests', [PendingRequestController::class, 'summary']);
 Route::get('pending-requests', [PendingRequestController::class, 'index']);
+
 Route::get('dashboard/upcoming-events', [UpcomingEventController::class, 'index']);
 Route::get('upcoming-events', [UpcomingEventController::class, 'index']);
 
-Route::get('dashboard/payroll-status', [DashboardPayrollController::class, 'show']);    
+Route::get('dashboard/payroll-status', [DashboardPayrollController::class, 'show']);
 
+// ============================================
 // NOTIFICATIONS (signed-in user)
+// ============================================
+
 Route::get('notifications/summary', [NotificationController::class, 'summary']);
 Route::get('notifications', [NotificationController::class, 'index']);
 Route::patch('notifications/read-all', [NotificationController::class, 'markAllRead']);
@@ -119,5 +126,34 @@ Route::patch('wage-orders/{wageOrder}/cancel', [WageOrderController::class, 'can
 Route::post('wage-orders/{wageOrder}/document', [WageOrderController::class, 'uploadDocument']);
 Route::delete('wage-orders/{wageOrder}/document', [WageOrderController::class, 'deleteDocument']);
 
+// Apply a wage order to employees (creates pending wage adjustments)
+Route::get('wage-orders/{wageOrder}/employees', [WageOrderEmployeeController::class, 'index']);
+Route::post('wage-orders/{wageOrder}/apply', [WageOrderEmployeeController::class, 'apply']);
+
+// ============================================
+// COMPENSATION: REGIONAL RATES
+// ============================================
+
 Route::get('regional-rates', [RegionalRateController::class, 'index']);
 Route::patch('regional-rates/locations/{location}', [RegionalRateController::class, 'updateLocation']);
+
+// ============================================
+// COMPENSATION: WAGE ADJUSTMENTS (from wage orders)
+// EMPLOYEES: SALARY ADJUSTMENTS (manual)
+// ============================================
+
+Route::middleware('can:manage-salary-adjustments')->group(function () {
+    // Wage Adjustments page: list + bulk approve / reject / apply
+    Route::get('wage-adjustments', [WageAdjustmentController::class, 'index']);
+    Route::patch('wage-adjustments/bulk', [WageAdjustmentController::class, 'bulk']);
+
+    // Salary Adjustments page (manual changes)
+    Route::get('salary-adjustments', [SalaryAdjustmentController::class, 'index']);
+    Route::post('salary-adjustments', [SalaryAdjustmentController::class, 'store']);
+    Route::get('salary-adjustments/{salaryAdjustment}', [SalaryAdjustmentController::class, 'show']);
+    Route::put('salary-adjustments/{salaryAdjustment}', [SalaryAdjustmentController::class, 'update']);
+    Route::delete('salary-adjustments/{salaryAdjustment}', [SalaryAdjustmentController::class, 'destroy']);
+    Route::patch('salary-adjustments/{salaryAdjustment}/approve', [SalaryAdjustmentController::class, 'approve']);
+    Route::patch('salary-adjustments/{salaryAdjustment}/reject', [SalaryAdjustmentController::class, 'reject']);
+    Route::patch('salary-adjustments/{salaryAdjustment}/apply', [SalaryAdjustmentController::class, 'apply']);
+});
