@@ -8,13 +8,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class TripTicket extends Model
 {
-    protected $fillable = [
+        protected $fillable = [
         'ticket_no',
         'requesting_department_id',
         'requested_by',
+        'approved_by',
         'trip_date',
         'scheduled_departure',
         'expected_return',
+        'vehicle_mode',
+        'vehicle_other',
         'driver_id',
         'vehicle_id',
         'destination',
@@ -27,6 +30,11 @@ class TripTicket extends Model
         'remarks',
         'created_by',
     ];
+
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'approved_by');
+    }
 
     protected function casts(): array
     {
