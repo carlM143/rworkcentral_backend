@@ -13,18 +13,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Apply a wage order to employees.
- *
- * Lists the active employees working in the wage order's region (by the
- * location of their latest employment). Employees earning less than the new
- * minimum come first and are the priority; HR / admin choose who to include
- * and how much. Each chosen employee gets a pending Salary Adjustment that
- * goes through the usual approve → apply flow before payroll uses it.
- *
- *   GET  /admin/wage-orders/{wageOrder}/employees?department_id=&location_id=&search=
- *   POST /admin/wage-orders/{wageOrder}/apply
- */
 class WageOrderEmployeeController extends Controller
 {
     public function index(Request $request, WageOrder $wageOrder): JsonResponse
@@ -32,6 +20,7 @@ class WageOrderEmployeeController extends Controller
         $validated = $request->validate([
             'department_id' => ['nullable', 'integer'],
             'location_id' => ['nullable', 'integer'],
+            'employment_type_id' => ['nullable', 'integer'],
             'search' => ['nullable', 'string', 'max:100'],
         ]);
 
@@ -41,6 +30,7 @@ class WageOrderEmployeeController extends Controller
         $rows = $all
             ->when($validated['department_id'] ?? null, fn ($c, $id) => $c->where('department_id', (int) $id))
             ->when($validated['location_id'] ?? null, fn ($c, $id) => $c->where('location_id', (int) $id))
+            ->when($validated['employment_type_id'] ?? null, fn ($c, $id) => $c->where('employment_type_id', (int) $id))
             ->when($search !== '', fn ($c) => $c->filter(fn ($e) => str_contains(
                 mb_strtolower($e['name'].' '.$e['emp_id'].' '.$e['department'].' '.$e['position']),
                 $search
@@ -60,6 +50,10 @@ class WageOrderEmployeeController extends Controller
             'departments' => $all->whereNotNull('department_id')
                 ->unique('department_id')
                 ->map(fn ($e) => ['id' => $e['department_id'], 'name' => $e['department']])
+                ->sortBy('name')->values(),
+            'employment_types' => $all->whereNotNull('employment_type_id')
+                ->unique('employment_type_id')
+                ->map(fn ($e) => ['id' => $e['employment_type_id'], 'name' => $e['employment_type']])
                 ->sortBy('name')->values(),
             'locations' => $all->whereNotNull('location_id')
                 ->unique('location_id')
@@ -176,6 +170,7 @@ class WageOrderEmployeeController extends Controller
             ->join('locations', 'locations.id', '=', 'employments.location_id')
             ->leftJoin('departments', 'departments.id', '=', 'employments.department_id')
             ->leftJoin('positions', 'positions.id', '=', 'employments.position_id')
+            ->leftJoin('employment_types', 'employment_types.id', '=', 'employments.employment_type_id')
             ->leftJoin('salary_setups', 'salary_setups.employee_id', '=', 'employees.id')
             ->leftJoin('salary_types', 'salary_types.id', '=', 'salary_setups.salary_type_id')
             ->where('employees.status', true)
@@ -189,6 +184,8 @@ class WageOrderEmployeeController extends Controller
                 'employments.department_id',
                 'departments.department_name',
                 'positions.position',
+                'employments.employment_type_id',
+                'employment_types.name AS employment_type_name',
                 'locations.id AS location_id',
                 'locations.location_name',
                 'locations.wage_classification',
@@ -267,6 +264,8 @@ class WageOrderEmployeeController extends Controller
                 'department_id' => $r->department_id ? (int) $r->department_id : null,
                 'department' => $r->department_name,
                 'position' => $r->position,
+                'employment_type_id' => $r->employment_type_id ? (int) $r->employment_type_id : null,
+                'employment_type' => $r->employment_type_name,
                 'location_id' => (int) $r->location_id,
                 'location' => $r->location_name,
                 'classification' => $classification,
