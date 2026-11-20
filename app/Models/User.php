@@ -130,10 +130,14 @@ class User extends Authenticatable
         string $module,
         string $name
     ): bool {
+        if (\App\Support\PrivilegeCatalog::isAdminRole($this->role?->name)) {
+            return true;
+        }
+
         if (!$this->role_id) {
             return false;
         }
-
+        
         return $this->role()
             ->whereHas('privileges', function ($query) use (
                 $module,
