@@ -11,8 +11,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware) {
-        //
+        ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'privilege' => \App\Http\Middleware\EnsurePrivilege::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

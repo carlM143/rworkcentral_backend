@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Admin\WageOrderEmployeeController;
 use App\Http\Controllers\Api\Admin\WageAdjustmentController;
 use App\Http\Controllers\Api\Admin\RegionalRateController;
 use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
+use App\Http\Controllers\Api\Admin\RoleController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -158,3 +159,17 @@ Route::middleware('can:manage-salary-adjustments')->group(function () {
     Route::patch('salary-adjustments/{salaryAdjustment}/reject', [SalaryAdjustmentController::class, 'reject']);
     Route::patch('salary-adjustments/{salaryAdjustment}/apply', [SalaryAdjustmentController::class, 'apply']);
 });
+
+// ============================================
+// SETTINGS: ROLES & PERMISSIONS
+// ============================================
+
+Route::middleware('privilege:settings,roles.view')->group(function () {
+    Route::get('roles', [RoleController::class, 'index']);
+    Route::get('roles/catalog', [RoleController::class, 'catalog']);
+    Route::get('roles/{role}', [RoleController::class, 'show']);
+});
+Route::post('roles', [RoleController::class, 'store'])->middleware('privilege:settings,roles.create');
+Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('privilege:settings,roles.edit');
+Route::put('roles/{role}/privileges', [RoleController::class, 'updatePrivileges'])->middleware('privilege:settings,roles.edit');
+Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('privilege:settings,roles.delete');
