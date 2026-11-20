@@ -16,6 +16,8 @@ use App\Models\Payroll;
 use App\Models\PayrollContribution;
 use App\Models\PayrollHolidayPay;
 use App\Models\PayrollPeriod;
+use App\Models\SalaryAdjustment;
+use App\Models\SalarySetup;
 use App\Models\TimeLog;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +66,22 @@ class PayrollGenerationService
             ->orderBy('lastname')
             ->orderBy('firstname')
             ->get();
+
+        // Salary adjustments (approved or applied) used to prorate a rate change inside the cut-off
+        $salaryAdjustments = SalaryAdjustment::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('status', ['approved', 'applied'])
+            ->orderBy('effective_date')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('employee_id');
+
+        // Additional allowances (employee_allowance), copied there when an adjustment is applied
+        $extraAllowances = DB::table('employee_allowance')
+            ->whereIn('salary_setup_id', $employees->pluck('salarySetup.id')->filter()->values())
+            ->orderBy('id')
+            ->get(['salary_setup_id', 'allowance_name', 'allowance'])
+            ->groupBy('salary_setup_id');
 
         $timeLogs = TimeLog::query()
             ->whereIn('employee_id', $employeeIds)
@@ -136,6 +154,7 @@ class PayrollGenerationService
 
         $generated = [];
         $skipped = [];
+        $warnings = [];
 
         DB::transaction(function () use (
             $period,
@@ -151,8 +170,13 @@ class PayrollGenerationService
             $schedules,
             $existing,
             $holidayContext,
+            $salaryAdjustments,
+            $extraAllowances,
+            $start,
+            $end,
             &$generated,
-            &$skipped
+            &$skipped,
+            &$warnings
         ) {
             foreach ($employees as $employee) {
                 $label = trim("{$employee->lastname}, {$employee->firstname}");
@@ -203,7 +227,17 @@ class PayrollGenerationService
                 $perMonth = self::PERIODS_PER_MONTH[$frequency] ?? 2;
 
                 $rateType = $this->rateType($salary->salaryType?->type_name);
-                $basic = (float) $salary->basic_salary;
+
+                // Salary in effect for each part of the cut-off (one segment when nothing changed)
+                $segments = $this->salarySegments(
+                    $salary,
+                    $salaryAdjustments->get($employee->id, collect()),
+                    $start,
+                    $end
+                );
+
+                $endSegment = end($segments);
+                $basic = $endSegment['basic'];
 
                 [$monthlyRate, $dailyRate] = match ($rateType) {
                     'daily' => [$basic * self::WORK_DAYS_PER_YEAR / 12, $basic],
@@ -218,6 +252,24 @@ class PayrollGenerationService
 
                 $logs = $timeLogs->get($employee->id, collect());
                 $daysWorked = $logs->filter(fn ($log) => $log->time_in && $log->time_out)->count();
+
+                // Days with only one punch. Nothing is deducted for these, so HR must review them
+                // (apply a time log correction, or file unpaid leave if the employee did not work).
+                $incompleteLogs = $logs
+                    ->filter(fn ($log) => (bool) $log->time_in !== (bool) $log->time_out)
+                    ->sortBy('work_date')
+                    ->map(fn ($log) => [
+                        'time_log_id' => $log->id,
+                        'work_date' => $log->work_date?->format('Y-m-d'),
+                        'time_in' => $log->time_in?->format('Y-m-d H:i:s'),
+                        'time_out' => $log->time_out?->format('Y-m-d H:i:s'),
+                        'missing' => $log->time_out ? 'time_in' : 'time_out',
+                        'payroll_effect' => $rateType === 'monthly'
+                            ? 'Paid as a full day (basic salary not reduced).'
+                            : 'Not paid for this day.',
+                    ])
+                    ->values()
+                    ->all();
                 $workedMinutes = (int) $logs->sum('worked_minutes');
 
                 $basicPay = match ($rateType) {
@@ -226,7 +278,31 @@ class PayrollGenerationService
                     default => $monthlyRate / $perMonth,
                 };
 
-                $allowancePay = (float) $salary->allowance / $perMonth;
+                $allowancePay = $endSegment['allowance'] / $perMonth;
+
+                // Salary adjustment effective inside this cut-off: old rate before, new rate from its date
+                if (count($segments) > 1) {
+                    [$basicPay, $allowancePay] = $this->proratedPay(
+                        $segments,
+                        $rateType,
+                        $perMonth,
+                        $logs,
+                        $start,
+                        $end
+                    );
+                }
+
+                // Additional allowances, split per cut-off like the main allowance
+                $extraLines = $extraAllowances->get($salary->id, collect())
+                    ->map(fn ($row) => [
+                        'allowance_name' => $row->allowance_name,
+                        'monthly_amount' => round((float) $row->allowance, 2),
+                        'amount' => round((float) $row->allowance / $perMonth, 2),
+                    ])
+                    ->values()
+                    ->all();
+
+                $allowancePay += collect($extraLines)->sum('amount');
 
                 $lateMinutes = (int) $logs->sum(fn ($log) => $this->lateMinutes($log));
                 $undertimeMinutes = (int) $logs->sum(fn ($log) => $this->undertimeMinutes($log));
@@ -328,7 +404,7 @@ class PayrollGenerationService
                     'payroll_group_id' => $assignment->payroll_group_id,
                     'salary_type_id' => $salary->salary_type_id,
                     'basic_salary' => $basic,
-                    'allowance' => (float) $salary->allowance,
+                    'allowance' => $endSegment['allowance'],
                     'bank_name' => $salary->bank_name ?? '',
                     'account_name' => $salary->account_name ?? '',
                     'account_number' => $salary->account_number ?? '',
@@ -363,6 +439,9 @@ class PayrollGenerationService
                         'loans' => $loanLines,
                         'holidays' => $holidayLines,
                         'holiday_days' => $holidayDays,
+                        'salary_segments' => $segments,
+                        'additional_allowances' => $extraLines,
+                        'incomplete_logs' => $incompleteLogs,
                     ],
                     'generated_by' => $userId,
                     'generated_at' => now(),
@@ -412,13 +491,33 @@ class PayrollGenerationService
                     'gross_pay' => round($gross, 2),
                     'total_deductions' => round($totalDeductions, 2),
                     'net_pay' => round($net, 2),
+                    'incomplete_logs' => $incompleteLogs,
                 ];
+
+                if ($incompleteLogs) {
+                    $count = count($incompleteLogs);
+
+                    $warnings[] = [
+                        'payroll_id' => $payroll->id,
+                        'employee_id' => $employee->id,
+                        'name' => $label,
+                        'code' => 'incomplete_time_logs',
+                        'rate_type' => $rateType,
+                        'message' => "{$count} day(s) with time in but no time out (or the reverse). "
+                            . ($rateType === 'monthly'
+                                ? 'Basic salary was still paid in full for these days.'
+                                : 'These days were not paid.')
+                            . ' Apply a time log correction, or file unpaid leave if the employee did not work, then regenerate.',
+                        'logs' => $incompleteLogs,
+                    ];
+                }
             }
         });
 
         return [
             'generated' => $generated,
             'skipped' => $skipped,
+            'warnings' => $warnings,
         ];
     }
 
@@ -469,6 +568,141 @@ class PayrollGenerationService
     private function rateType(?string $typeName): string
     {
         return HolidayPayService::rateType($typeName);
+    }
+
+    /**
+     * Splits the cut-off into the salary in effect for each part.
+     *
+     * - Applied adjustments already changed salary_setups, so for one effective
+     *   after the cut-off start, the cut-off starts on its previous values.
+     * - An approved (not yet applied) adjustment effective on/before the start
+     *   is used for the whole cut-off.
+     * - Every approved/applied adjustment effective inside the cut-off starts a
+     *   new segment on its effective date with its new values.
+     *
+     * @return array<int, array{from: string, to: string, days: int, basic: float, allowance: float, salary_adjustment_id: ?int}>
+     */
+    private function salarySegments(SalarySetup $salary, Collection $adjustments, string $start, string $end): array
+    {
+        $adjustments = $adjustments
+            ->filter(fn (SalaryAdjustment $a) => (int) $a->salary_setup_id === (int) $salary->id && $a->effective_date)
+            ->sortBy(fn (SalaryAdjustment $a) => $a->effective_date->format('Y-m-d') . sprintf('-%010d', $a->id))
+            ->values();
+
+        $basic = (float) $salary->basic_salary;
+        $allowance = (float) $salary->allowance;
+        $adjustmentId = null;
+
+        $firstLaterApplied = $adjustments->first(
+            fn (SalaryAdjustment $a) => $a->status === 'applied' && $a->effective_date->format('Y-m-d') > $start
+        );
+
+        if ($firstLaterApplied) {
+            $basic = (float) $firstLaterApplied->previous_basic_salary;
+            $allowance = (float) ($firstLaterApplied->previous_allowance ?? $allowance);
+        } else {
+            $approvedBefore = $adjustments->last(
+                fn (SalaryAdjustment $a) => $a->status === 'approved' && $a->effective_date->format('Y-m-d') <= $start
+            );
+
+            if ($approvedBefore) {
+                $basic = (float) $approvedBefore->new_basic_salary;
+                $allowance = (float) ($approvedBefore->new_allowance ?? $allowance);
+                $adjustmentId = $approvedBefore->id;
+            }
+        }
+
+        $segments = [];
+        $from = $start;
+
+        $inside = $adjustments->filter(function (SalaryAdjustment $a) use ($start, $end) {
+            $date = $a->effective_date->format('Y-m-d');
+
+            return $date > $start && $date <= $end;
+        });
+
+        foreach ($inside as $adjustment) {
+            $date = $adjustment->effective_date->format('Y-m-d');
+
+            if ($date > $from) {
+                $segments[] = $this->segment($from, $this->dayBefore($date), $basic, $allowance, $adjustmentId);
+                $from = $date;
+            }
+
+            $basic = (float) $adjustment->new_basic_salary;
+            $allowance = (float) ($adjustment->new_allowance ?? $allowance);
+            $adjustmentId = $adjustment->id;
+        }
+
+        $segments[] = $this->segment($from, $end, $basic, $allowance, $adjustmentId);
+
+        return $segments;
+    }
+
+    private function segment(string $from, string $to, float $basic, float $allowance, ?int $adjustmentId): array
+    {
+        return [
+            'from' => $from,
+            'to' => $to,
+            'days' => $this->daysBetween($from, $to),
+            'basic' => $basic,
+            'allowance' => $allowance,
+            'salary_adjustment_id' => $adjustmentId,
+        ];
+    }
+
+    /**
+     * Basic and allowance pay when the salary changes inside the cut-off.
+     * Monthly pay and allowances are split by calendar days in each segment;
+     * daily/hourly pay uses the rate in effect on each time log's work date.
+     *
+     * @return array{0: float, 1: float}
+     */
+    private function proratedPay(array $segments, string $rateType, float $perMonth, Collection $logs, string $start, string $end): array
+    {
+        $cutoffDays = $this->daysBetween($start, $end);
+        $basicPay = 0.0;
+        $allowancePay = 0.0;
+
+        foreach ($segments as $segment) {
+            $share = $segment['days'] / $cutoffDays;
+
+            $allowancePay += $segment['allowance'] / $perMonth * $share;
+
+            if ($rateType === 'monthly') {
+                $basicPay += $segment['basic'] / $perMonth * $share;
+            }
+        }
+
+        if ($rateType !== 'monthly') {
+            foreach ($logs as $log) {
+                $date = $log->work_date?->format('Y-m-d');
+
+                $segment = collect($segments)->first(
+                    fn ($s) => $date !== null && $date >= $s['from'] && $date <= $s['to']
+                ) ?? end($segments);
+
+                if ($rateType === 'daily' && $log->time_in && $log->time_out) {
+                    $basicPay += $segment['basic'];
+                }
+
+                if ($rateType === 'hourly') {
+                    $basicPay += (int) $log->worked_minutes / 60 * $segment['basic'];
+                }
+            }
+        }
+
+        return [$basicPay, $allowancePay];
+    }
+
+    private function daysBetween(string $from, string $to): int
+    {
+        return (int) \Illuminate\Support\Carbon::parse($from)->diffInDays(\Illuminate\Support\Carbon::parse($to)) + 1;
+    }
+
+    private function dayBefore(string $date): string
+    {
+        return \Illuminate\Support\Carbon::parse($date)->subDay()->format('Y-m-d');
     }
 
     private function lateMinutes(TimeLog $log): int

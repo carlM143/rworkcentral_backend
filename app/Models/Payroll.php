@@ -33,9 +33,8 @@ class Payroll extends Model
         'unpaid_leave_days',
         'unpaid_leave_deduction',
         'holiday_pay',
-        'holiday_pay' => 'decimal:2',
-        'unpaid_holiday_days' => 'decimal:2',
-        'unpaid_holiday_deduction' => 'decimal:2',
+        'unpaid_holiday_days',
+        'unpaid_holiday_deduction',
         'gross_pay',
         'contributions_total',
         'loan_deductions_total',
@@ -47,6 +46,8 @@ class Payroll extends Model
         'generated_at',
         'finalized_by',
         'finalized_at',
+        'payslip_sent_at',
+        'payslip_sent_by',
     ];
 
     protected $hidden = [
@@ -71,6 +72,9 @@ class Payroll extends Model
             'undertime_deduction' => 'decimal:2',
             'unpaid_leave_days' => 'decimal:2',
             'unpaid_leave_deduction' => 'decimal:2',
+            'holiday_pay' => 'decimal:2',
+            'unpaid_holiday_days' => 'decimal:2',
+            'unpaid_holiday_deduction' => 'decimal:2',
             'gross_pay' => 'decimal:2',
             'contributions_total' => 'decimal:2',
             'loan_deductions_total' => 'decimal:2',
@@ -78,6 +82,7 @@ class Payroll extends Model
             'total_deductions' => 'decimal:2',
             'net_pay' => 'decimal:2',
             'breakdown' => 'array',
+            'payslip_sent_at' => 'datetime',
             'generated_at' => 'datetime',
             'finalized_at' => 'datetime',
         ];

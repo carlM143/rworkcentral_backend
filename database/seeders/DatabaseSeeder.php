@@ -46,6 +46,7 @@ class DatabaseSeeder extends Seeder
 
             HolidayPayRuleSeeder::class,
 
+
             EmployeeLoanSeeder::class,
         ]);
     }

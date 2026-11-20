@@ -350,6 +350,7 @@ Route::get('payslips', [PayslipController::class, 'index']);
 Route::get('payslips/{payroll}', [PayslipController::class, 'show']);
 
 Route::get('employee-payrolls', [EmployeePayrollController::class, 'index']);
+Route::post('employee-payrolls/send-payslips', [EmployeePayrollController::class, 'sendPayslips']);
 
 
 //holidays 
@@ -363,3 +364,5 @@ Route::put('holidays/{holiday}/coverage', [HolidayCoverageController::class, 'up
 
 Route::get('oba-requests', [AdminObaRequestcontroller::class, 'index']);
 Route::get('oba-requests/{obaRequest}', [AdminObaRequestcontroller::class, 'show']);
+Route::patch('oba-requests/{obaRequest}/approve', [AdminObaRequestcontroller::class, 'approve']);
+Route::patch('oba-requests/{obaRequest}/reject', [AdminObaRequestcontroller::class, 'reject']);

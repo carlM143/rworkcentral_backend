@@ -22,6 +22,19 @@ class TimeLogSeeder extends Seeder
         '2026-11-02',
     ];
 
+    /**
+     * One sample undertime log: the first employee leaves early on this date.
+     * Nov 10, 2026 is a Tuesday (working day).
+     */
+    private const UNDERTIME_DATE = '2026-11-10';
+    private const UNDERTIME_MINUTES = 90;
+
+    /**
+     * One sample incomplete log: the second employee has a time in but no time out
+     * on this date, to test the payroll "incomplete time logs" warning.
+     */
+    private const MISSING_TIME_OUT_DATE = '2026-11-10';
+
     private const BREAK_START = '12:00';
     private const BREAK_END = '13:00';
 
@@ -85,7 +98,11 @@ class TimeLogSeeder extends Seeder
                     substr($day->time_in, 0, 5),
                     substr($day->time_out, 0, 5),
                     $grace,
-                    $this->scenario($employeeIndex, $dayIndex),
+                    match (true) {
+                        $employeeIndex === 0 && $date->toDateString() === self::UNDERTIME_DATE => 'undertime',
+                        $employeeIndex === 1 && $date->toDateString() === self::MISSING_TIME_OUT_DATE => 'missing_time_out',
+                        default => $this->scenario($employeeIndex, $dayIndex),
+                    },
                     $employeeIndex + $dayIndex
                 );
 
@@ -139,10 +156,34 @@ class TimeLogSeeder extends Seeder
         $actualIn = match ($scenario) {
             'late' => $in->copy()->addMinutes(10 + ($seed % 4) * 5),
             'within_grace' => $in->copy()->addMinutes(max(1, min($grace, 3))),
+            'undertime', 'missing_time_out' => $in->copy(),
             default => $in->copy()->subMinutes($seed % 6),
         };
 
-        $actualOut = $out->copy()->addMinutes($seed % 5);
+        // Time in only: no time out, no break, nothing worked, nothing to measure undertime against
+        if ($scenario === 'missing_time_out') {
+            return [
+                'time_in' => $actualIn->toDateTimeString(),
+                'time_out' => null,
+                'break_out' => null,
+                'break_in' => null,
+                'scheduled_time_in' => $in->toDateTimeString(),
+                'scheduled_time_out' => $out->toDateTimeString(),
+                'raw_late_minutes' => 0,
+                'chargeable_late_minutes' => 0,
+                'late_minutes' => 0,
+                'undertime_minutes' => 0,
+                'worked_minutes' => 0,
+                'status' => 'Incomplete',
+            ];
+        }
+
+        $actualOut = $scenario === 'undertime'
+            ? $out->copy()->subMinutes(self::UNDERTIME_MINUTES)
+            : $out->copy()->addMinutes($seed % 5);
+
+        // Minutes left before the scheduled time out (0 unless the employee left early)
+        $undertime = $actualOut->lt($out) ? (int) $actualOut->diffInMinutes($out) : 0;
 
         $rawLate = max(0, (int) $in->diffInMinutes($actualIn, false));
         $chargeableLate = $rawLate > $grace ? $rawLate : 0;
@@ -163,9 +204,13 @@ class TimeLogSeeder extends Seeder
             'raw_late_minutes' => $rawLate,
             'chargeable_late_minutes' => $chargeableLate,
             'late_minutes' => $chargeableLate,
-            'undertime_minutes' => 0,
+            'undertime_minutes' => $undertime,
             'worked_minutes' => $worked,
-            'status' => $chargeableLate > 0 ? 'Late' : 'Complete',
+            'status' => match (true) {
+                $chargeableLate > 0 => 'Late',
+                $undertime > 0 => 'Undertime',
+                default => 'Complete',
+            },
         ];
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ObaRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ObaRequestcontroller extends Controller
 {
@@ -82,6 +83,90 @@ class ObaRequestcontroller extends Controller
             'message' => 'OBA request retrieved successfully.',
             'data' => $this->present($obaRequest->load(self::RELATIONS)),
         ]);
+    }
+
+    // PATCH /admin/oba-requests/{obaRequest}/approve
+    // Final HR approval. The department head must have approved first.
+    public function approve(Request $request, ObaRequest $obaRequest): JsonResponse
+    {
+        $this->authorizeHR($request);
+
+        $result = $this->act($obaRequest, [ObaRequest::STATUS_DEPT_HEAD_APPROVED], [
+            'status' => ObaRequest::STATUS_APPROVED,
+            'approved_by' => $request->user()->id,
+            'rejection_reason' => null,
+        ], 'Only OBA requests approved by the department head can be approved.');
+
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OBA request approved successfully.',
+            'data' => $this->present($result),
+        ]);
+    }
+
+    // PATCH /admin/oba-requests/{obaRequest}/reject   body: { reason }
+    // HR can reject while it is still pending or after the department head approved.
+    public function reject(Request $request, ObaRequest $obaRequest): JsonResponse
+    {
+        $this->authorizeHR($request);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = $this->act($obaRequest, [
+            ObaRequest::STATUS_PENDING,
+            ObaRequest::STATUS_DEPT_HEAD_APPROVED,
+        ], [
+            'status' => ObaRequest::STATUS_REJECTED,
+            'approved_by' => $request->user()->id, // HR user who acted
+            'rejection_reason' => $validated['reason'],
+        ], 'This OBA request can no longer be rejected.');
+
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OBA request rejected.',
+            'data' => $this->present($result),
+        ]);
+    }
+
+    /**
+     * Locks the row, checks the status is still one of $allowed, then updates it.
+     * The lock stops two HR users from approving/rejecting the same request at once.
+     */
+    private function act(ObaRequest $obaRequest, array $allowed, array $changes, string $error): ObaRequest|JsonResponse
+    {
+        return DB::transaction(function () use ($obaRequest, $allowed, $changes, $error) {
+            $locked = ObaRequest::query()->lockForUpdate()->findOrFail($obaRequest->id);
+
+            if (! in_array($locked->status, $allowed, true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $error,
+                ], 422);
+            }
+
+            $locked->update($changes);
+
+            return $locked->fresh(array_merge(self::RELATIONS, ['approver:id,name']));
+        });
+    }
+
+    private function authorizeHR(Request $request): void
+    {
+        abort_unless(
+            in_array($request->user()?->role?->name, ['Administrator', 'Human Resources'], true),
+            403,
+            'You are not authorized to approve or reject OBA requests.'
+        );
     }
 
     /** Adds filer_name and department_name so the table needs no extra lookups. */

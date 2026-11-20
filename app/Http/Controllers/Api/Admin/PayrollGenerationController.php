@@ -113,6 +113,12 @@ class PayrollGenerationController extends Controller
             $message .= " {$skipped} skipped.";
         }
 
+        $warned = count($result['warnings'] ?? []);
+
+        if ($warned) {
+            $message .= " Review {$warned} employee(s) with time logs missing a time out or time in.";
+        }
+
         return response()->json([
             'success' => $generated > 0,
             'message' => $message,
