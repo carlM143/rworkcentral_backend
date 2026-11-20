@@ -1,0 +1,111 @@
+<?php
+
+namespace App\Http\Controllers\Api\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Models\ObaRequest;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class ObaRequestcontroller extends Controller
+{
+    private const RELATIONS = [
+        'obaEmployees',
+        'images',
+        'filer:id,firstname,lastname,department_id',
+        'filer.department:id,department_name',
+    ];
+
+    // GET /admin/oba-requests?status=&department_id=&search=&date_from=&date_to=&per_page=
+    public function index(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['nullable', 'string', 'max:50'],
+            'department_id' => ['nullable', 'integer', 'exists:departments,id'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $obaRequests = ObaRequest::with(self::RELATIONS)
+            ->when(
+                ! empty($validated['status']),
+                fn ($query) => $query->where('status', $validated['status'])
+            )
+            ->when(
+                ! empty($validated['department_id']),
+                fn ($query) => $query->whereHas(
+                    'filer',
+                    fn ($q) => $q->where('department_id', $validated['department_id'])
+                )
+            )
+            ->when(
+                ! empty($validated['date_from']),
+                fn ($query) => $query->whereDate('date_request', '>=', $validated['date_from'])
+            )
+            ->when(
+                ! empty($validated['date_to']),
+                fn ($query) => $query->whereDate('date_request', '<=', $validated['date_to'])
+            )
+            ->when(! empty($validated['search']), function ($query) use ($validated) {
+                $term = '%'.trim($validated['search']).'%';
+
+                $query->where(function ($q) use ($term) {
+                    $q->where('destination', 'like', $term)
+                        ->orWhere('reason', 'like', $term)
+                        ->orWhereHas('filer', fn ($f) => $f
+                            ->where('firstname', 'like', $term)
+                            ->orWhere('lastname', 'like', $term))
+                        ->orWhereHas('obaEmployees', fn ($o) => $o
+                            ->where('employee_name', 'like', $term));
+                });
+            })
+            ->orderByDesc('date_request')
+            ->orderByDesc('id')
+            ->paginate($validated['per_page'] ?? 15)
+            ->through(fn (ObaRequest $r) => $this->present($r));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OBA requests retrieved successfully.',
+            'data' => $obaRequests,
+            'summary' => $this->statusSummary(),
+        ]);
+    }
+
+    // GET /admin/oba-requests/{obaRequest}
+    public function show(ObaRequest $obaRequest): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'message' => 'OBA request retrieved successfully.',
+            'data' => $this->present($obaRequest->load(self::RELATIONS)),
+        ]);
+    }
+
+    /** Adds filer_name and department_name so the table needs no extra lookups. */
+    private function present(ObaRequest $obaRequest): ObaRequest
+    {
+        $filer = $obaRequest->filer;
+
+        $obaRequest->setAttribute(
+            'filer_name',
+            $filer ? trim($filer->firstname.' '.$filer->lastname) : null
+        );
+        $obaRequest->setAttribute('department_name', $filer?->department?->department_name);
+
+        return $obaRequest;
+    }
+
+    /** Count of requests per status, for the stat cards (not affected by filters). */
+    private function statusSummary(): array
+    {
+        return ObaRequest::query()
+            ->selectRaw('status, COUNT(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->map(fn ($total) => (int) $total)
+            ->all();
+    }
+}

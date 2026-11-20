@@ -24,15 +24,6 @@ class PayrollPeriodSeeder extends Seeder
                 'cutoff_end' => '2026-11-15',
                 'payment_date' => '2026-11-18',
             ],
-            [
-                'period_name' => 'November 16–30, 2026',
-                'cutoff_number' => 2,
-                'pay_period_start' => '2026-11-16',
-                'pay_period_end' => '2026-11-30',
-                'cutoff_start' => '2026-11-08',
-                'cutoff_end' => '2026-11-22',
-                'payment_date' => '2026-11-30',
-            ],
         ];
 
         foreach ($periods as $period) {

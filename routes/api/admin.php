@@ -51,6 +51,8 @@ use App\Http\Controllers\Api\Admin\EmployeePayrollController;
 use App\Http\Controllers\Api\Admin\HolidayPayController;
 use App\Http\Controllers\Api\Admin\HolidayPayRuleController;
 
+use App\Http\Controllers\Api\Admin\ObaRequestcontroller as AdminObaRequestcontroller;
+
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -357,3 +359,7 @@ Route::get('holiday-pays', [HolidayPayController::class, 'index']);
 Route::get('holiday-coverage', [HolidayCoverageController::class, 'index']);
 Route::get('holidays/{holiday}/coverage', [HolidayCoverageController::class, 'show']);
 Route::put('holidays/{holiday}/coverage', [HolidayCoverageController::class, 'update']);
+
+
+Route::get('oba-requests', [AdminObaRequestcontroller::class, 'index']);
+Route::get('oba-requests/{obaRequest}', [AdminObaRequestcontroller::class, 'show']);

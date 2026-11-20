@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\Employee\OvertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogController;
 use App\Http\Controllers\Api\Employee\UndertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogCorrectionRequestController;
+use App\Http\Controllers\Api\Employee\ObaRequestcontroller;
+use App\Http\Controllers\Api\Employee\ObaDepartmentHeadController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -64,3 +66,19 @@ Route::post('/time-log-correction-requests', [TimeLogCorrectionRequestController
 Route::get('/time-log-correction-requests/{id}', [TimeLogCorrectionRequestController::class, 'show']);
 Route::match(['put', 'patch'], '/time-log-correction-requests/{id}', [TimeLogCorrectionRequestController::class, 'update']);
 Route::patch('/time-log-correction-requests/{id}/cancel', [TimeLogCorrectionRequestController::class, 'cancel']);
+
+
+Route::get('oba-requests', [ObaRequestcontroller::class, 'index']);
+Route::post('oba-requests', [ObaRequestcontroller::class, 'store']);
+
+// Static routes first
+Route::get('oba-requests/departments', [ObaRequestcontroller::class, 'departments']);
+Route::get('oba-requests/available-employees', [ObaRequestcontroller::class, 'availableEmployees']);
+Route::get('oba-requests/approvals', [ObaDepartmentHeadController::class, 'index']);
+
+Route::get('oba-requests/{obaRequest}', [ObaRequestcontroller::class, 'show']);
+Route::patch('oba-requests/{obaRequest}/cancel', [ObaRequestcontroller::class, 'cancel']);
+Route::patch('oba-requests/{obaRequest}/dept-head/approve', [ObaDepartmentHeadController::class, 'approve']);
+Route::patch('oba-requests/{obaRequest}/dept-head/reject', [ObaDepartmentHeadController::class, 'reject']);
+Route::post('oba-requests/{obaRequest}/employees', [ObaRequestcontroller::class, 'addEmployees']);
+Route::delete('oba-requests/{obaRequest}/employees/{obaEmployee}', [ObaRequestcontroller::class, 'removeEmployee']);

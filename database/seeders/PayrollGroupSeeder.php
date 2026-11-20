@@ -14,9 +14,7 @@ class PayrollGroupSeeder extends Seeder
     {
         $groups = [
             'Regular Employees Group',
-            'Project-Based Employees',
             'Management',
-            'Drivers',
         ];
 
         foreach ($groups as $group) {

@@ -159,4 +159,9 @@ class Employee extends Model
         return $this->hasMany(PayrollHolidayPay::class);
     }
 
+    public function obaRequests(): HasMany
+    {
+        return $this->hasMany(ObaRequest::class);
+    }
+
 }
