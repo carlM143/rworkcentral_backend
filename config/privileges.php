@@ -162,6 +162,7 @@ return [
                 'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve']],
                 'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve']],
                 'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve']],
+                'oba' => ['label' => 'OBA Approvals', 'actions' => ['view', 'approve']],
             ],
         ],
 

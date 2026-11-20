@@ -48,6 +48,8 @@ class DatabaseSeeder extends Seeder
 
 
             EmployeeLoanSeeder::class,
+
+            PrivilegeSeeder::class,
         ]);
     }
 }
