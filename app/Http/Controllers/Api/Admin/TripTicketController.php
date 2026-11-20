@@ -15,14 +15,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Trip Tickets.
- *
- * Flow: scheduled -> ongoing (depart: time + odometer out)
- *       -> completed (return: time + odometer in); scheduled -> cancelled.
- */
 class TripTicketController extends Controller
 {
     /** Department head = position title contains Head, Manager or Supervisor. */
@@ -32,6 +27,17 @@ class TripTicketController extends Controller
         'rest_day' => 'Rest day',
         'on_leave' => 'On leave',
         'license_expired' => 'License expired',
+    ];
+
+    private const MODES = ['company', 'bus', 'motorcycle', 'taxi', 'jeepney', 'others'];
+
+    private const MODE_LABELS = [
+        'company' => 'Company Vehicle',
+        'bus' => 'Bus',
+        'motorcycle' => 'Motorcycle',
+        'taxi' => 'Taxi',
+        'jeepney' => 'Jeepney',
+        'others' => 'Others',
     ];
 
     public function __construct(
@@ -47,7 +53,6 @@ class TripTicketController extends Controller
     /**
      * GET /admin/trip-tickets
      *   ?page=&per_page=&search=&status=&driver_id=&department_id=&date_from=&date_to=
-     * Paginated list plus today's stats and the filter dropdown options.
      */
     public function index(Request $request): JsonResponse
     {
@@ -79,6 +84,8 @@ class TripTicketController extends Controller
                     $w->where('ticket_no', 'like', $like)
                         ->orWhere('destination', 'like', $like)
                         ->orWhere('purpose', 'like', $like)
+                        ->orWhere('vehicle_mode', 'like', $like)
+                        ->orWhere('vehicle_other', 'like', $like)
                         ->orWhereHas('vehicle', fn ($v) => $v->where('plate_no', 'like', $like))
                         ->orWhereHas('driver.employment.employee', $name)
                         ->orWhereHas('requester', $name)
@@ -182,6 +189,38 @@ class TripTicketController extends Controller
     }
 
     /**
+     * GET /admin/trip-tickets/approvers
+     * Active employees, heads/managers/supervisors first.
+     */
+    public function approvers(): JsonResponse
+    {
+        $approvers = Employee::query()
+            ->where('status', true)
+            ->with(['latestEmployment.position:id,position', 'latestEmployment.department:id,department_name'])
+            ->get()
+            ->map(function (Employee $e): array {
+                $position = (string) ($e->latestEmployment?->position?->position ?? '');
+
+                return [
+                    'id' => $e->id,
+                    'emp_id' => (string) $e->emp_id,
+                    'name' => $this->fullName($e),
+                    'position' => $position !== '' ? $position : '—',
+                    'department' => $e->latestEmployment?->department?->department_name,
+                    'is_head' => (bool) preg_match(self::HEAD_PATTERN, $position),
+                ];
+            })
+            ->sortBy([['is_head', 'desc'], ['name', 'asc']])
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Approvers retrieved.',
+            'data' => $approvers,
+        ]);
+    }
+
+    /**
      * GET /admin/trip-tickets/options?date=&start=&end=&department_id=
      * Drivers, vehicles and passengers for the time window, each with the
      * reason when it cannot be selected.
@@ -210,7 +249,7 @@ class TripTicketController extends Controller
     }
 
     // =====================================================
-    // CREATE
+    // CREATE / UPDATE
     // =====================================================
 
     /**
@@ -224,18 +263,8 @@ class TripTicketController extends Controller
         $ticket = DB::transaction(function () use ($request, $validated, $passengerIds): TripTicket {
             $this->assertBookable($validated, $passengerIds);
 
-            $ticket = TripTicket::create([
+            $ticket = TripTicket::create($this->ticketFields($validated) + [
                 'ticket_no' => $this->nextTicketNo($validated['trip_date']),
-                'requesting_department_id' => $validated['requesting_department_id'],
-                'requested_by' => $validated['requested_by'],
-                'trip_date' => $validated['trip_date'],
-                'scheduled_departure' => $validated['scheduled_departure'],
-                'expected_return' => $validated['expected_return'],
-                'driver_id' => $validated['driver_id'],
-                'vehicle_id' => $validated['vehicle_id'],
-                'destination' => trim($validated['destination']),
-                'purpose' => trim($validated['purpose']),
-                'remarks' => isset($validated['remarks']) ? trim($validated['remarks']) ?: null : null,
                 'status' => 'scheduled',
                 'created_by' => $request->user()?->id,
             ]);
@@ -268,19 +297,7 @@ class TripTicketController extends Controller
 
             $this->assertBookable($validated, $passengerIds, $ticket->id);
 
-            $ticket->update([
-                'requesting_department_id' => $validated['requesting_department_id'],
-                'requested_by' => $validated['requested_by'],
-                'trip_date' => $validated['trip_date'],
-                'scheduled_departure' => $validated['scheduled_departure'],
-                'expected_return' => $validated['expected_return'],
-                'driver_id' => $validated['driver_id'],
-                'vehicle_id' => $validated['vehicle_id'],
-                'destination' => trim($validated['destination']),
-                'purpose' => trim($validated['purpose']),
-                'remarks' => isset($validated['remarks']) ? trim($validated['remarks']) ?: null : null,
-            ]);
-
+            $ticket->update($this->ticketFields($validated));
             $ticket->passengers()->sync($passengerIds);
 
             return $ticket;
@@ -295,43 +312,51 @@ class TripTicketController extends Controller
 
     /**
      * PATCH /admin/trip-tickets/{tripTicket}/depart
+     * Odometer is only required for company vehicles.
      */
     public function depart(Request $request, TripTicket $tripTicket): JsonResponse
     {
         $validated = $request->validate([
             'departed_at' => ['required', 'date_format:H:i'],
-            'odometer_out' => ['required', 'integer', 'min:0'],
+            'odometer_out' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $ticket = DB::transaction(function () use ($tripTicket, $validated): TripTicket {
             $ticket = TripTicket::query()->lockForUpdate()->findOrFail($tripTicket->id);
+            $company = ($ticket->vehicle_mode ?? 'company') === 'company';
 
             if ($ticket->status !== 'scheduled') {
                 throw ValidationException::withMessages(['status' => 'Only scheduled trips can depart.']);
             }
 
-            $last = $this->schedule->lastOdometer($ticket->vehicle_id, $ticket->id);
-            if ($last !== null && (int) $validated['odometer_out'] < $last) {
-                throw ValidationException::withMessages([
-                    'odometer_out' => 'Odometer cannot be lower than the last reading ('.number_format($last).' km).',
-                ]);
-            }
+            if ($company) {
+                if (($validated['odometer_out'] ?? null) === null) {
+                    throw ValidationException::withMessages(['odometer_out' => 'Enter the odometer reading.']);
+                }
 
-            $otherOngoing = TripTicket::query()
-                ->whereKeyNot($ticket->id)
-                ->where('status', 'ongoing')
-                ->where(fn ($q) => $q->where('driver_id', $ticket->driver_id)->orWhere('vehicle_id', $ticket->vehicle_id))
-                ->first();
-            if ($otherOngoing) {
-                throw ValidationException::withMessages([
-                    'status' => "Driver or vehicle is still on {$otherOngoing->ticket_no}. Record its return first.",
-                ]);
+                $last = $this->schedule->lastOdometer($ticket->vehicle_id, $ticket->id);
+                if ($last !== null && (int) $validated['odometer_out'] < $last) {
+                    throw ValidationException::withMessages([
+                        'odometer_out' => 'Odometer cannot be lower than the last reading ('.number_format($last).' km).',
+                    ]);
+                }
+
+                $otherOngoing = TripTicket::query()
+                    ->whereKeyNot($ticket->id)
+                    ->where('status', 'ongoing')
+                    ->where(fn ($q) => $q->where('driver_id', $ticket->driver_id)->orWhere('vehicle_id', $ticket->vehicle_id))
+                    ->first();
+                if ($otherOngoing) {
+                    throw ValidationException::withMessages([
+                        'status' => "Driver or vehicle is still on {$otherOngoing->ticket_no}. Record its return first.",
+                    ]);
+                }
             }
 
             $ticket->update([
                 'status' => 'ongoing',
                 'departed_at' => $validated['departed_at'],
-                'odometer_out' => $validated['odometer_out'],
+                'odometer_out' => $company ? $validated['odometer_out'] : null,
             ]);
 
             return $ticket;
@@ -347,11 +372,12 @@ class TripTicketController extends Controller
     {
         $validated = $request->validate([
             'returned_at' => ['required', 'date_format:H:i'],
-            'odometer_in' => ['required', 'integer', 'min:0'],
+            'odometer_in' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $ticket = DB::transaction(function () use ($tripTicket, $validated): TripTicket {
             $ticket = TripTicket::query()->lockForUpdate()->findOrFail($tripTicket->id);
+            $company = ($ticket->vehicle_mode ?? 'company') === 'company';
 
             if ($ticket->status !== 'ongoing') {
                 throw ValidationException::withMessages(['status' => 'Only ongoing trips can be returned.']);
@@ -363,16 +389,22 @@ class TripTicketController extends Controller
                 ]);
             }
 
-            if ((int) $validated['odometer_in'] < (int) $ticket->odometer_out) {
-                throw ValidationException::withMessages([
-                    'odometer_in' => 'Odometer cannot be lower than the reading at departure ('.number_format($ticket->odometer_out).' km).',
-                ]);
+            if ($company) {
+                if (($validated['odometer_in'] ?? null) === null) {
+                    throw ValidationException::withMessages(['odometer_in' => 'Enter the odometer reading.']);
+                }
+
+                if ((int) $validated['odometer_in'] < (int) $ticket->odometer_out) {
+                    throw ValidationException::withMessages([
+                        'odometer_in' => 'Odometer cannot be lower than the reading at departure ('.number_format($ticket->odometer_out).' km).',
+                    ]);
+                }
             }
 
             $ticket->update([
                 'status' => 'completed',
                 'returned_at' => $validated['returned_at'],
-                'odometer_in' => $validated['odometer_in'],
+                'odometer_in' => $company ? $validated['odometer_in'] : null,
             ]);
 
             return $ticket;
@@ -519,28 +551,66 @@ class TripTicketController extends Controller
 
     private function validateTicket(Request $request): array
     {
-        return $request->validate([
+        $company = ($request->input('vehicle_mode') ?? 'company') === 'company';
+
+        $validated = $request->validate([
             'requesting_department_id' => ['required', 'integer', 'exists:departments,id'],
             'requested_by' => ['required', 'integer', 'exists:employees,id'],
+            'approved_by' => ['required', 'integer', 'exists:employees,id'],
             'trip_date' => ['required', 'date', 'after_or_equal:today'],
             'scheduled_departure' => ['required', 'date_format:H:i'],
             'expected_return' => ['required', 'date_format:H:i', 'after:scheduled_departure'],
-            'driver_id' => ['required', 'integer', 'exists:drivers_info,id'],
-            'vehicle_id' => ['required', 'integer', 'exists:vehicles,id'],
+            'vehicle_mode' => ['nullable', Rule::in(self::MODES)],
+            'vehicle_other' => ['nullable', 'string', 'max:100', 'required_if:vehicle_mode,others'],
+            'driver_id' => [Rule::requiredIf($company), 'nullable', 'integer', 'exists:drivers_info,id'],
+            'vehicle_id' => [Rule::requiredIf($company), 'nullable', 'integer', 'exists:vehicles,id'],
             'destination' => ['required', 'string', 'max:255'],
             'purpose' => ['required', 'string', 'max:255'],
-            'passenger_ids' => ['nullable', 'array'],
+            'passenger_ids' => $company ? ['nullable', 'array'] : ['required', 'array', 'min:1'],
             'passenger_ids.*' => ['integer', 'distinct', 'exists:employees,id'],
             'remarks' => ['nullable', 'string', 'max:1000'],
         ], [
             'trip_date.after_or_equal' => 'The trip date cannot be in the past.',
             'expected_return.after' => 'Expected return must be after the departure time.',
+            'vehicle_other.required_if' => 'Specify the type of transport.',
+            'passenger_ids.required' => 'Select at least one passenger for this transport.',
+            'passenger_ids.min' => 'Select at least one passenger for this transport.',
         ]);
+
+        $validated['vehicle_mode'] ??= 'company';
+
+        return $validated;
+    }
+
+    /**
+     * Columns shared by create and edit.
+     */
+    private function ticketFields(array $v): array
+    {
+        $mode = $v['vehicle_mode'];
+        $company = $mode === 'company';
+
+        return [
+            'requesting_department_id' => $v['requesting_department_id'],
+            'requested_by' => $v['requested_by'],
+            'approved_by' => $v['approved_by'],
+            'trip_date' => $v['trip_date'],
+            'scheduled_departure' => $v['scheduled_departure'],
+            'expected_return' => $v['expected_return'],
+            'vehicle_mode' => $mode,
+            'vehicle_other' => $mode === 'others' ? trim((string) $v['vehicle_other']) : null,
+            'driver_id' => $company ? $v['driver_id'] : null,
+            'vehicle_id' => $company ? $v['vehicle_id'] : null,
+            'destination' => trim($v['destination']),
+            'purpose' => trim($v['purpose']),
+            'remarks' => isset($v['remarks']) ? trim($v['remarks']) ?: null : null,
+        ];
     }
 
     /**
      * Requester, driver, vehicle and passengers must all be free for the
      * window. $excludeId ignores the ticket being edited.
+     * Driver and vehicle are only checked for company vehicles.
      *
      * @param  array<int, int>  $passengerIds
      */
@@ -564,24 +634,26 @@ class TripTicketController extends Controller
             $excludeId,
         );
 
-        $driver = collect($options['drivers'])->firstWhere('id', (int) $validated['driver_id']);
-        if (! $driver || ! $driver['available']) {
-            throw ValidationException::withMessages([
-                'driver_id' => 'Driver is not available: '.($driver['reason'] ?? 'not found or inactive').'.',
-            ]);
-        }
+        if ($validated['vehicle_mode'] === 'company') {
+            $driver = collect($options['drivers'])->firstWhere('id', (int) $validated['driver_id']);
+            if (! $driver || ! $driver['available']) {
+                throw ValidationException::withMessages([
+                    'driver_id' => 'Driver is not available: '.($driver['reason'] ?? 'not found or inactive').'.',
+                ]);
+            }
 
-        $vehicle = collect($options['vehicles'])->firstWhere('id', (int) $validated['vehicle_id']);
-        if (! $vehicle || ! $vehicle['available']) {
-            throw ValidationException::withMessages([
-                'vehicle_id' => 'Vehicle is not available: '.($vehicle['reason'] ?? 'not found or inactive').'.',
-            ]);
-        }
+            $vehicle = collect($options['vehicles'])->firstWhere('id', (int) $validated['vehicle_id']);
+            if (! $vehicle || ! $vehicle['available']) {
+                throw ValidationException::withMessages([
+                    'vehicle_id' => 'Vehicle is not available: '.($vehicle['reason'] ?? 'not found or inactive').'.',
+                ]);
+            }
 
-        if (count($passengerIds) > $vehicle['capacity']) {
-            throw ValidationException::withMessages([
-                'passenger_ids' => "{$vehicle['plate_no']} can carry up to {$vehicle['capacity']} passenger(s).",
-            ]);
+            if (count($passengerIds) > $vehicle['capacity']) {
+                throw ValidationException::withMessages([
+                    'passenger_ids' => "{$vehicle['plate_no']} can carry up to {$vehicle['capacity']} passenger(s).",
+                ]);
+            }
         }
 
         $busyPassenger = collect($options['passengers'])
@@ -613,7 +685,7 @@ class TripTicketController extends Controller
     private function filterOptions(): array
     {
         $drivers = DriverInfo::query()
-            ->whereIn('id', TripTicket::query()->select('driver_id')->distinct())
+            ->whereIn('id', TripTicket::query()->whereNotNull('driver_id')->select('driver_id')->distinct())
             ->with('employment.employee:id,firstname,middlename,lastname,suffix')
             ->get()
             ->map(fn (DriverInfo $d): array => ['id' => $d->id, 'name' => $this->fullName($d->employment?->employee)])
@@ -666,6 +738,9 @@ class TripTicketController extends Controller
             'requester:id,emp_id,firstname,middlename,lastname,suffix',
             'requester.latestEmployment',
             'requester.latestEmployment.position:id,position',
+            'approver:id,emp_id,firstname,middlename,lastname,suffix',
+            'approver.latestEmployment',
+            'approver.latestEmployment.position:id,position',
             'driver',
             'driver.employment',
             'driver.employment.employee:id,firstname,middlename,lastname,suffix',
@@ -683,7 +758,9 @@ class TripTicketController extends Controller
     {
         $departedAt = $this->schedule->time($t->departed_at);
         $returnedAt = $this->schedule->time($t->returned_at);
-        $reading = $lastOdometer->get($t->vehicle_id);
+        $mode = $t->vehicle_mode ?? 'company';
+        $company = $mode === 'company';
+        $reading = $t->vehicle_id ? $lastOdometer->get($t->vehicle_id) : null;
 
         return [
             'id' => $t->id,
@@ -700,17 +777,31 @@ class TripTicketController extends Controller
                     'position' => $t->requester->latestEmployment?->position?->position ?? '—',
                 ]
                 : null,
-            'driver' => [
+            'approved_by' => $t->approver
+                ? [
+                    'id' => $t->approver->id,
+                    'name' => $this->fullName($t->approver),
+                    'position' => $t->approver->latestEmployment?->position?->position ?? '—',
+                ]
+                : null,
+            'vehicle_mode' => $mode,
+            'vehicle_other' => $t->vehicle_other,
+            'vehicle_label' => $company
+                ? ($t->vehicle?->plate_no ?? '—')
+                : ($mode === 'others'
+                    ? ($t->vehicle_other ?: 'Others')
+                    : (self::MODE_LABELS[$mode] ?? ucfirst($mode))),
+            'driver' => $t->driver_id ? [
                 'id' => $t->driver_id,
                 'name' => $this->fullName($t->driver?->employment?->employee),
                 'drivers_code' => $t->driver?->drivers_code ?? '—',
-            ],
-            'vehicle' => [
+            ] : null,
+            'vehicle' => $t->vehicle_id ? [
                 'id' => $t->vehicle?->id,
                 'plate_no' => $t->vehicle?->plate_no,
                 'description' => $t->vehicle?->description,
                 'capacity' => $t->vehicle?->capacity,
-            ],
+            ] : null,
             'last_odometer' => $reading && $reading > 0 ? $reading : null,
             'destination' => $t->destination,
             'purpose' => $t->purpose,

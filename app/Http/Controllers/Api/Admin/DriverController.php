@@ -16,13 +16,6 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
-/**
- * Drivers (drivers_info).
- *
- * An employee becomes eligible as a driver when the position of their
- * current employment contains the word "Driver" (e.g. "Driver" under
- * Operations or Marketing). HR then registers the license details here.
- */
 class DriverController extends Controller
 {
     public function __construct(private readonly DriverAvailabilityService $availability)
@@ -107,7 +100,6 @@ class DriverController extends Controller
         $validated = $request->validate([
             'employee_id' => ['required', 'integer', 'exists:employees,id'],
             'drivers_code' => ['nullable', 'string', 'max:50', 'unique:drivers_info,drivers_code'],
-            'licence_no' => ['required', 'string', 'max:50', 'unique:drivers_info,licence_no'],
             'expire_date' => ['required', 'date', 'after:today'],
             'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ], [
@@ -197,16 +189,10 @@ class DriverController extends Controller
         ]);
     }
 
-    /**
-     * POST /admin/drivers/{driverInfo}  (multipart, used for edits because
-     * PHP does not parse file uploads on PUT/PATCH requests)
-     * Renew or correct the license, change the driver code or photo.
-     */
     public function update(Request $request, DriverInfo $driverInfo): JsonResponse
     {
         $validated = $request->validate([
             'drivers_code' => ['required', 'string', 'max:50', 'unique:drivers_info,drivers_code,'.$driverInfo->id],
-            'licence_no' => ['required', 'string', 'max:50', 'unique:drivers_info,licence_no,'.$driverInfo->id],
             'expire_date' => ['required', 'date'],
             'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'remove_image' => ['nullable', 'boolean'],
@@ -354,7 +340,6 @@ class DriverController extends Controller
         return [
             'id' => $driver->id,
             'drivers_code' => $driver->drivers_code,
-            'licence_no' => $driver->licence_no,
             'expire_date' => $driver->expire_date?->toDateString(),
             'image_path' => $driver->image_path ? Storage::disk('public')->url($driver->image_path) : null,
             'status' => $driver->status ?? 'active',

@@ -62,6 +62,7 @@ Route::get('trip-tickets/requesters', [TripTicketController::class, 'requesters'
 Route::get('trip-tickets/options', [TripTicketController::class, 'options']);
 Route::get('trip-tickets', [TripTicketController::class, 'index']);
 Route::post('trip-tickets', [TripTicketController::class, 'store']);
+Route::get('trip-tickets/approvers', [TripTicketController::class, 'approvers']);
 Route::get('trip-tickets/{tripTicket}', [TripTicketController::class, 'show']);
 Route::put('trip-tickets/{tripTicket}', [TripTicketController::class, 'update']);
 Route::patch('trip-tickets/{tripTicket}/depart', [TripTicketController::class, 'depart']);
