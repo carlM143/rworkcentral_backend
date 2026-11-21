@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\Admin\QrCodeGenerationController;
 
 use App\Http\Controllers\Api\Admin\PayslipController;
 use App\Http\Controllers\Api\Admin\EmployeePayrollController;
+use App\Http\Controllers\Api\Admin\ParollHistoryController;
 
 use App\Http\Controllers\Api\Admin\HolidayPayController;
 use App\Http\Controllers\Api\Admin\HolidayPayRuleController;
@@ -292,6 +293,7 @@ Route::get('employee-loans', [EmployeeLoanController::class, 'index']);
 Route::post('employee-loans', [EmployeeLoanController::class, 'store']);
 Route::get('employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'show']);
 Route::put('employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'update']);
+Route::patch('employee-loans/{employeeLoan}/deduction-schedule', [EmployeeLoanController::class, 'updateDeductionSchedule']);
 Route::get('employee-loans/{employeeLoan}/transactions', [EmployeeLoanTransactionController::class, 'history']);
 Route::get('employee-loan-transactions', [EmployeeLoanTransactionController::class, 'index']);
 
@@ -351,6 +353,11 @@ Route::get('payslips/{payroll}', [PayslipController::class, 'show']);
 
 Route::get('employee-payrolls', [EmployeePayrollController::class, 'index']);
 Route::post('employee-payrolls/send-payslips', [EmployeePayrollController::class, 'sendPayslips']);
+
+// Payroll History
+Route::get('payroll-history', [ParollHistoryController::class, 'index']);
+Route::get('payroll-history/employees/{employee}', [ParollHistoryController::class, 'employee']);
+Route::get('payroll-history/{payrollPeriod}', [ParollHistoryController::class, 'show']);
 
 
 //holidays 

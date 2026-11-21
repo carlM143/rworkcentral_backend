@@ -367,8 +367,19 @@ class PayrollGenerationService
                 $loanLines = [];
 
                 foreach ($loans->get($employee->id, collect()) as $loan) {
+                    // deduction_amount is per month. Each cutoff takes its percent of it (like contributions);
+                    // a monthly payroll group has one payroll a month, so it takes the whole amount.
+                    $percent = $frequency === 'monthly'
+                        ? 100.0
+                        : $loan->percentForCutoff((int) $period->cutoff_number);
+
+                    if ($percent <= 0) {
+                        continue; // not deducted in this cutoff
+                    }
+
+                    $scheduled = round((float) $loan->deduction_amount * $percent / 100, 2);
                     $remaining = max(0, (float) $loan->opening_balance + (float) $loan->transactions_total);
-                    $amount = min((float) $loan->deduction_amount, $remaining, $available);
+                    $amount = min($scheduled, $remaining, $available);
 
                     if ($amount <= 0) {
                         continue;
@@ -378,15 +389,15 @@ class PayrollGenerationService
 
                     $loanLines[] = [
                         'employee_loan_id' => $loan->id,
-                        'loan_type' => $loan->loanType?->loan_type_name
-                            ?? $loan->loanType?->type_name
-                            ?? $loan->loanType?->name
-                            ?? 'Loan',
+                        'loan_type' => $loan->loanType?->loan_name ?? 'Loan',
                         'reference' => $loan->loan_reference_no,
+                        'cutoff_number' => (int) $period->cutoff_number,
+                        'cutoff_percent' => $percent,
+                        'scheduled_amount' => $scheduled,
                         'amount' => round($amount, 2),
                         'balance_before' => round($remaining, 2),
                         'balance_after' => round($remaining - $amount, 2),
-                        'partial' => $amount < (float) $loan->deduction_amount,
+                        'partial' => $amount < $scheduled,
                     ];
                 }
 

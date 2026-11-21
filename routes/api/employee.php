@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Employee\EmployeeLeaveTypesController;
 use App\Http\Controllers\Api\Employee\EmployeePayslipController;
 use App\Http\Controllers\Api\Employee\EmployeeProfileController;
 use App\Http\Controllers\Api\Employee\LeaveRequestController;
+use App\Http\Controllers\Api\Employee\LoanController;
 use App\Http\Controllers\Api\Employee\OvertimeRequestController;
 use App\Http\Controllers\Api\Employee\TimeLogController;
 use App\Http\Controllers\Api\Employee\UndertimeRequestController;
@@ -58,6 +59,10 @@ Route::get('/time-logs/today', [TimeLogController::class, 'today']);
 // Payslips / Payroll
 Route::get('/payslips', [EmployeePayslipController::class, 'index']);
 Route::get('/payslips/{payroll}', [EmployeePayslipController::class, 'show']);
+
+// Loans (read-only: the employee's own loans and payment history)
+Route::get('/loans', [LoanController::class, 'index']);
+Route::get('/loans/{employeeLoan}', [LoanController::class, 'show']);
 
 // Time Log Correction Requests
 Route::get('/time-log-correction-requests/time-log', [TimeLogCorrectionRequestController::class, 'timeLogByDate']);
