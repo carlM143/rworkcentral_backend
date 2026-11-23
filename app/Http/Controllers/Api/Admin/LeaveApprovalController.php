@@ -697,9 +697,13 @@ class LeaveApprovalController extends Controller
     {
         $dates = $request->leaveDates->sortBy('leave_date')->values();
 
-        return [
+         return [
             'id' => $request->id,
             'request_no' => $request->request_no,
+
+            // Supervisor (first-level) approval, for the "Supervisor" column
+            'dept_head_status' => $request->dept_head_status ?? 'skipped',
+            'dept_head_id' => $request->dept_head_id,
 
             'employee' => [
                 'id' => $request->employee?->id,

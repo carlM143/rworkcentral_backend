@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\SupervisorApprovalController;
 use App\Http\Controllers\Api\Admin\DepartmentHeadController;
 use App\Http\Controllers\Api\Admin\WageComplianceController;
+use App\Http\Controllers\Api\Admin\PayrollReportController;
+use App\Http\Controllers\Api\Admin\ContributionReportController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -185,10 +187,15 @@ Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index'
     ->middleware('privilege:approvals,first_level.view');
 Route::patch('supervisor-approvals/{type}/{id}/approve', [SupervisorApprovalController::class, 'approve'])
     ->middleware('privilege:approvals,first_level.approve')
-    ->whereIn('type', ['leave', 'overtime', 'undertime', 'oba'])->whereNumber('id');
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
 Route::patch('supervisor-approvals/{type}/{id}/reject', [SupervisorApprovalController::class, 'reject'])
     ->middleware('privilege:approvals,first_level.approve')
-    ->whereIn('type', ['leave', 'overtime', 'undertime', 'oba'])->whereNumber('id');
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
+
+// For HR's approval pages: supervisor names, and "Approve anyway"
+Route::get('supervisor-approvals/approvers', [SupervisorApprovalController::class, 'approvers']);
+Route::patch('supervisor-approvals/{type}/{id}/override', [SupervisorApprovalController::class, 'override'])
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
 
 
 // ============================================
@@ -204,3 +211,18 @@ Route::patch('department-heads/{department}', [DepartmentHeadController::class, 
 
 Route::get('reports/wage-compliance', [WageComplianceController::class, 'index'])
     ->middleware('privilege:reports,wage_compliance.view');
+
+// ============================================
+// REPORTS: PAYROLL
+// ============================================
+
+Route::get('reports/payroll', [PayrollReportController::class, 'index'])
+    ->middleware('privilege:reports,payroll.view');    
+
+ // ============================================
+// REPORTS: SSS, PAG-IBIG, PHILHEALTH
+// ============================================
+
+Route::get('reports/contributions/{agency}', [ContributionReportController::class, 'index'])
+    ->middleware('privilege:reports,government.view')
+    ->whereIn('agency', ['sss', 'philhealth', 'pagibig']);   

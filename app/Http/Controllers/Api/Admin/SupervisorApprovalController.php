@@ -13,19 +13,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Approval Center › For My Approval (supervisors, admin portal).
- *
- * First-level approval of leave, overtime, undertime, work from home and
- * official business requests filed by employees. HR gives the final approval afterwards.
- *
- * A supervisor sees requests assigned to them (department head) and
- * requests not assigned to anyone; Administrators see all.
- *
- *   GET   /admin/supervisor-approvals?type=all|leave|overtime|undertime|wfh|oba&tab=pending|history
- *   PATCH /admin/supervisor-approvals/{type}/{id}/approve   { remarks? }
- *   PATCH /admin/supervisor-approvals/{type}/{id}/reject    { remarks }
- */
 class SupervisorApprovalController extends Controller
 {
     private const TYPES = ['leave', 'overtime', 'undertime', 'wfh', 'oba'];
@@ -104,6 +91,73 @@ class SupervisorApprovalController extends Controller
         ]);
 
         return $this->act($request, $type, $id, false, $validated['remarks']);
+    }
+
+    /**
+     * Names of users who give the first approval, for the "Supervisor" column
+     * on HR's approval pages.
+     */
+    public function approvers(): JsonResponse
+    {
+        $ids = collect(DepartmentHead::supervisorUserIds())
+            ->merge(DB::table('employees')
+                ->whereIn('id', DB::table('departments')->whereNotNull('head_employee_id')->pluck('head_employee_id'))
+                ->whereNotNull('user_id')
+                ->pluck('user_id'))
+            ->unique()
+            ->values();
+
+        $names = $ids->mapWithKeys(fn ($id) => [(int) $id => DepartmentHead::nameOfUser((int) $id)]);
+
+        return response()->json(['success' => true, 'message' => 'Approvers retrieved.', 'data' => $names]);
+    }
+
+    /**
+     * HR skips the supervisor step (e.g. the supervisor is on leave), then
+     * approves as usual. Recorded as "overridden".
+     */
+    public function override(Request $request, string $type, int $id): JsonResponse
+    {
+        abort_unless(in_array($type, self::TYPES, true), 404);
+
+        [$module, $privilege] = match ($type) {
+            'leave' => ['approvals', 'leaves.approve'],
+            'overtime' => ['approvals', 'overtime.approve'],
+            'undertime' => ['approvals', 'undertime.approve'],
+            'wfh' => ['wfh', 'requests.approve'],
+            'oba' => ['approvals', 'oba.approve'],
+        };
+        abort_unless($request->user()->hasPrivilege($module, $privilege), 403, 'You cannot give the final approval for this request.');
+
+        $table = self::TABLES[$type];
+        $hr = $request->user()->name;
+
+        DB::transaction(function () use ($type, $table, $id, $hr) {
+            $row = DB::table($table)->where('id', $id)->lockForUpdate()->first();
+            abort_unless($row, 404, 'Request not found.');
+
+            $waiting = $type === 'oba'
+                ? $row->status === 'pending'
+                : $row->dept_head_status === 'pending' && $row->status === 'pending';
+
+            if (! $waiting) {
+                throw ValidationException::withMessages(['status' => 'This request is no longer waiting for a supervisor.']);
+            }
+
+            DB::table($table)->where('id', $id)->update(($type === 'oba'
+                ? ['status' => 'dept_head_approved', 'dept_head_acted_at' => now()]
+                : [
+                    'dept_head_status' => 'overridden',
+                    'dept_head_acted_at' => now(),
+                    'dept_head_remarks' => "Supervisor step skipped by {$hr}.",
+                ]) + ['updated_at' => now()]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Supervisor step skipped. You can now approve the request.',
+            'data' => null,
+        ]);
     }
 
     // =====================================================
