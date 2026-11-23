@@ -59,8 +59,8 @@ class DashboardPayrollController extends Controller
         $totals = DB::table('payrolls')
             ->where('payroll_period_id', $period->id)
             ->selectRaw("
-                COUNT(*) AS generated,
-                SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END) AS finalized,
+                COUNT(*) AS generated_count,
+                SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END) AS finalized_count,
                 COALESCE(SUM(gross_pay), 0) AS gross,
                 COALESCE(SUM(total_deductions), 0) AS deductions,
                 COALESCE(SUM(net_pay), 0) AS net
@@ -97,11 +97,11 @@ class DashboardPayrollController extends Controller
                 'status_label' => self::STEPS[$step],
                 'step' => $step,
                 'steps' => self::STEPS,
-                'next_action' => $this->nextAction($period->status, $paid, (int) $totals->generated),
+                'next_action' => $this->nextAction($period->status, $paid, (int) $totals->generated_count),
                 'employees' => [
                     'active' => $activeEmployees,
-                    'generated' => (int) $totals->generated,
-                    'finalized' => (int) $totals->finalized,
+                    'generated' => (int) $totals->generated_count,
+                    'finalized' => (int) $totals->finalized_count,
                 ],
                 'totals' => [
                     'gross' => round((float) $totals->gross, 2),

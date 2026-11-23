@@ -19,6 +19,9 @@ use App\Http\Controllers\Api\Admin\WageAdjustmentController;
 use App\Http\Controllers\Api\Admin\RegionalRateController;
 use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
 use App\Http\Controllers\Api\Admin\RoleController;
+use App\Http\Controllers\Api\Admin\SupervisorApprovalController;
+use App\Http\Controllers\Api\Admin\DepartmentHeadController;
+use App\Http\Controllers\Api\Admin\WageComplianceController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -173,3 +176,31 @@ Route::post('roles', [RoleController::class, 'store'])->middleware('privilege:se
 Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('privilege:settings,roles.edit');
 Route::put('roles/{role}/privileges', [RoleController::class, 'updatePrivileges'])->middleware('privilege:settings,roles.edit');
 Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('privilege:settings,roles.delete');
+
+// ============================================
+// APPROVAL CENTER: FOR MY APPROVAL (supervisors)
+// ============================================
+
+Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index'])
+    ->middleware('privilege:approvals,first_level.view');
+Route::patch('supervisor-approvals/{type}/{id}/approve', [SupervisorApprovalController::class, 'approve'])
+    ->middleware('privilege:approvals,first_level.approve')
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'oba'])->whereNumber('id');
+Route::patch('supervisor-approvals/{type}/{id}/reject', [SupervisorApprovalController::class, 'reject'])
+    ->middleware('privilege:approvals,first_level.approve')
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'oba'])->whereNumber('id');
+
+
+// ============================================
+// DEPARTMENTS: DEPARTMENT HEADS
+// ============================================
+
+Route::get('department-heads', [DepartmentHeadController::class, 'index']);
+Route::patch('department-heads/{department}', [DepartmentHeadController::class, 'update']);    
+
+// ============================================
+// REPORTS: WAGE COMPLIANCE
+// ============================================
+
+Route::get('reports/wage-compliance', [WageComplianceController::class, 'index'])
+    ->middleware('privilege:reports,wage_compliance.view');

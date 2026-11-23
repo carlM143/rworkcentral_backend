@@ -1,5 +1,26 @@
 <?php
 
+/*
+|--------------------------------------------------------------------------
+| Privileges (static)
+|--------------------------------------------------------------------------
+|
+| Every privilege the HRIS checks, grouped by module and feature, in the
+| order of the admin sidebar. Roles are dynamic (Settings › Users & Access ›
+| Roles & Permissions); privileges are defined here, together with the code
+| that checks them, and synced to the `privileges` table by PrivilegeSeeder.
+|
+| Each feature lists its actions. The stored privilege is:
+|   module = the module key        (e.g. "payroll")
+|   name   = "{feature}.{action}"  (e.g. "pay_periods.view")
+| unless an action maps to an explicit name (kept for existing checks,
+| e.g. timekeeping "view", "import", "correction.review").
+|
+| Actions shown as columns: view, create, edit, delete, approve, export.
+| "notes" explains what an action means for that feature.
+|
+*/
+
 return [
 
     'actions' => ['view', 'create', 'edit', 'delete', 'approve', 'export'],
@@ -159,10 +180,15 @@ return [
             'label' => 'Approval Center',
             'icon' => 'clipboard-check',
             'features' => [
-                'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve']],
-                'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve']],
-                'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve']],
-                'oba' => ['label' => 'OBA Approvals', 'actions' => ['view', 'approve']],
+                'first_level' => [
+                    'label' => 'Supervisor Approval (first level)',
+                    'actions' => ['view', 'approve'],
+                    'notes' => 'Approve or reject employee requests before HR (For My Approval).',
+                ],
+                'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
+                'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
+                'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
+                'oba' => ['label' => 'Official Business Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
             ],
         ],
 
@@ -221,6 +247,12 @@ return [
         ],
     ],
 
+    /*
+    | Default privileges per role, applied by PrivilegeSeeder only while a role
+    | has no privileges outside the timekeeping module yet (so changes made in
+    | Roles & Permissions are never overwritten). Administrator always gets
+    | every privilege. Patterns: "module:name", "*" matches any part.
+    */
     'defaults' => [
         'Human Resources' => [
             'portal:admin',
@@ -247,19 +279,21 @@ return [
             'settings:roles.view',
             'settings:qr.*',
         ],
+        // Supervisors and managers sign in to the admin portal and see only
+        // "For My Approval" (first-level approval of employee requests).
         'Manager' => [
+            'portal:admin',
             'portal:employee',
-            'timekeeping:view',
+            'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
-            'approvals:*',
         ],
         'Supervisor' => [
+            'portal:admin',
             'portal:employee',
-            'timekeeping:view',
+            'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
-            'approvals:*',
         ],
         'Employee' => [
             'portal:employee',
