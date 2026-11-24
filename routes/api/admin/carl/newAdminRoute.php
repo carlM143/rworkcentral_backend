@@ -24,6 +24,8 @@ use App\Http\Controllers\Api\Admin\DepartmentHeadController;
 use App\Http\Controllers\Api\Admin\WageComplianceController;
 use App\Http\Controllers\Api\Admin\PayrollReportController;
 use App\Http\Controllers\Api\Admin\ContributionReportController;
+use App\Http\Controllers\Api\Admin\ThirteenthMonthReportController;
+use App\Http\Controllers\Api\Admin\ReportSummaryController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -226,3 +228,17 @@ Route::get('reports/payroll', [PayrollReportController::class, 'index'])
 Route::get('reports/contributions/{agency}', [ContributionReportController::class, 'index'])
     ->middleware('privilege:reports,government.view')
     ->whereIn('agency', ['sss', 'philhealth', 'pagibig']);   
+
+// ============================================
+// REPORTS: 13TH MONTH PAY
+// ============================================
+
+Route::get('reports/thirteenth-month', [ThirteenthMonthReportController::class, 'index'])
+    ->middleware('privilege:reports,thirteenth_month.view');    
+
+// ============================================
+// REPORTS: REPORTS CENTER
+// ============================================
+
+Route::get('reports/summary', [ReportSummaryController::class, 'index'])
+    ->middleware('privilege:reports,center.view');    
