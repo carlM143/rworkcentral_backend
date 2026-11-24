@@ -42,6 +42,8 @@ class RoleController extends Controller
                     'key' => $moduleKey,
                     'label' => $module['label'],
                     'icon' => $module['icon'] ?? null,
+                    // Which portal shows this module: checking it gives that portal access.
+                    'portal' => $moduleKey === 'portal' ? null : ($module['portal'] ?? 'admin'),
                     'features' => collect($module['features'])
                         ->map(function (array $feature, string $featureKey) use ($moduleKey, $ids) {
                             $actions = [];

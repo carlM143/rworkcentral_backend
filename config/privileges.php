@@ -36,6 +36,29 @@ return [
             ],
         ],
 
+        // Employee portal (self-service). Checking any of these also gives the
+        // role "Portal Access › Employee Portal" (Roles & Permissions page).
+        'employee_portal' => [
+            'label' => 'Employee Portal',
+            'icon' => 'user-round',
+            'portal' => 'employee',
+            'features' => [
+                'dashboard' => ['label' => 'Dashboard', 'actions' => ['view']],
+                'attendance' => ['label' => 'Attendance', 'actions' => ['view'], 'notes' => 'Own time logs.'],
+                'scan_qr' => ['label' => 'Scan QR', 'actions' => ['view', 'create'], 'notes' => 'Create = time in / out with the attendance QR code.'],
+                'calendar' => ['label' => 'Calendar', 'actions' => ['view']],
+                'leave_credits' => ['label' => 'Leave Credits', 'actions' => ['view']],
+                'leave' => ['label' => 'Leave Requests', 'actions' => ['view', 'create'], 'notes' => 'Create = file, edit or cancel own requests.'],
+                'undertime' => ['label' => 'Undertime Requests', 'actions' => ['view', 'create']],
+                'overtime' => ['label' => 'Overtime Requests', 'actions' => ['view', 'create']],
+                'time_log_corrections' => ['label' => 'Time Log Corrections', 'actions' => ['view', 'create']],
+                'wfh' => ['label' => 'Work From Home', 'actions' => ['view', 'create']],
+                'oba' => ['label' => 'Official Business (OBA)', 'actions' => ['view', 'create']],
+                'payslips' => ['label' => 'Payslips', 'actions' => ['view', 'export'], 'notes' => 'Export = download or print.'],
+                'loans' => ['label' => 'Loans', 'actions' => ['view']],
+            ],
+        ],
+
         'dashboard' => [
             'label' => 'Dashboard',
             'icon' => 'dashboard',
@@ -284,6 +307,7 @@ return [
         'Manager' => [
             'portal:admin',
             'portal:employee',
+            'employee_portal:*',
             'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
@@ -291,12 +315,14 @@ return [
         'Supervisor' => [
             'portal:admin',
             'portal:employee',
+            'employee_portal:*',
             'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
         ],
         'Employee' => [
             'portal:employee',
+            'employee_portal:*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
         ],
