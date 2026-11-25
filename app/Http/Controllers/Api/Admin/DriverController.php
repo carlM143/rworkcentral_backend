@@ -104,7 +104,6 @@ class DriverController extends Controller
             'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ], [
             'expire_date.after' => 'The license is already expired.',
-            'licence_no.unique' => 'This license number is already registered.',
             'drivers_code.unique' => 'This driver code is already used.',
         ]);
 
@@ -134,7 +133,6 @@ class DriverController extends Controller
 
                 $driver = DriverInfo::create([
                     'employment_id' => $employment->id,
-                    'licence_no' => strtoupper(trim($validated['licence_no'])),
                     'drivers_code' => strtoupper(trim($validated['drivers_code'] ?? '')) ?: $this->generateCode(),
                     'expire_date' => $validated['expire_date'],
                 ]);
@@ -197,7 +195,6 @@ class DriverController extends Controller
             'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'remove_image' => ['nullable', 'boolean'],
         ], [
-            'licence_no.unique' => 'This license number is already registered.',
             'drivers_code.unique' => 'This driver code is already used.',
         ]);
 
@@ -214,7 +211,6 @@ class DriverController extends Controller
 
             $driverInfo->update([
                 'drivers_code' => strtoupper(trim($validated['drivers_code'])),
-                'licence_no' => strtoupper(trim($validated['licence_no'])),
                 'expire_date' => $validated['expire_date'],
                 'image_path' => $imagePath,
             ]);

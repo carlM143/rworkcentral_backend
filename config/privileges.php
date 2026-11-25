@@ -89,12 +89,12 @@ return [
                     'notes' => 'Create = import from biometric devices.',
                 ],
                 'corrections' => [
-                    'label' => 'Time Log Corrections',
+                    'label' => 'Time Log Correction Requests',
                     'actions' => ['create' => 'correction.request', 'approve' => 'correction.review'],
                     'notes' => 'Create = file a correction, Approve = approve or reject.',
                 ],
                 'late_adjustments' => [
-                    'label' => 'Late Adjustments',
+                    'label' => 'Late Adjustment',
                     'actions' => ['create' => 'adjustment.request', 'approve' => 'adjustment.review'],
                 ],
                 'manual_time' => ['label' => 'Manual Time In / Out', 'actions' => ['view', 'create']],
@@ -142,7 +142,7 @@ return [
             'icon' => 'landmark',
             'features' => [
                 'types' => ['label' => 'Contribution Types', 'actions' => ['view', 'create', 'edit', 'delete']],
-                'rates' => ['label' => 'Contribution Rates', 'actions' => ['view', 'create', 'edit', 'delete']],
+                'rates' => ['label' => 'Contribution Rate', 'actions' => ['view', 'create', 'edit', 'delete']],
                 'brackets' => ['label' => 'Bracket Management', 'actions' => ['view', 'create', 'edit', 'delete']],
                 'history' => ['label' => 'Contribution History', 'actions' => ['view', 'export']],
                 'settings' => ['label' => 'Contribution Settings', 'actions' => ['view', 'edit']],
@@ -183,7 +183,7 @@ return [
             'label' => 'Holiday Management',
             'icon' => 'calendar',
             'features' => [
-                'holidays' => ['label' => 'Holidays', 'actions' => ['view', 'create', 'edit', 'delete']],
+                'holidays' => ['label' => 'Holiday', 'actions' => ['view', 'create', 'edit', 'delete']],
                 'coverage' => ['label' => 'Holiday Coverage', 'actions' => ['view', 'edit']],
                 'holiday_pay' => ['label' => 'Holiday Pay', 'actions' => ['view', 'edit']],
             ],
@@ -193,7 +193,7 @@ return [
             'label' => 'Departments',
             'icon' => 'briefcase',
             'features' => [
-                'departments' => ['label' => 'Departments', 'actions' => ['view', 'create', 'edit', 'delete']],
+                'departments' => ['label' => 'Departments', 'actions' => ['view', 'create', 'edit', 'delete'], 'notes' => 'Edit also opens Department Heads.'],
                 'positions' => ['label' => 'Positions', 'actions' => ['view', 'create', 'edit', 'delete']],
                 'employment_types' => ['label' => 'Employment Types', 'actions' => ['view', 'create', 'edit', 'delete']],
             ],
@@ -204,14 +204,14 @@ return [
             'icon' => 'clipboard-check',
             'features' => [
                 'first_level' => [
-                    'label' => 'Supervisor Approval (first level)',
+                    'label' => 'For My Approval',
                     'actions' => ['view', 'approve'],
-                    'notes' => 'Approve or reject employee requests before HR (For My Approval).',
+                    'notes' => 'Supervisor (first-level) approval of employee requests, before HR.',
                 ],
                 'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
-                'oba' => ['label' => 'Official Business Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
+                'oba' => ['label' => 'OBA Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
             ],
         ],
 
@@ -252,7 +252,7 @@ return [
                 'attendance' => ['label' => 'Attendance Reports', 'actions' => ['view', 'export']],
                 'payroll' => ['label' => 'Payroll Reports', 'actions' => ['view', 'export']],
                 'thirteenth_month' => ['label' => '13th Month Pay', 'actions' => ['view', 'export']],
-                'government' => ['label' => 'SSS, Pag-IBIG & PhilHealth', 'actions' => ['view', 'export']],
+                'government' => ['label' => 'SSS, Pag-IBIG & PhilHealth Reports', 'actions' => ['view', 'export']],
                 'wage_compliance' => ['label' => 'Wage Compliance', 'actions' => ['view', 'export']],
             ],
         ],

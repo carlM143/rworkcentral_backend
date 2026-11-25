@@ -292,6 +292,10 @@ class PayrollGenerationService
                     );
                 }
 
+                // Days and pay per salary segment, for the payroll breakdown
+                // (e.g. "Nov 16–24 · 2 day(s) × ₱650", "Nov 25–30 · 1 day(s) × ₱750").
+                $segments = $this->describeSegments($segments, $rateType, $perMonth, $logs, $start, $end);
+
                 // Additional allowances, split per cut-off like the main allowance
                 $extraLines = $extraAllowances->get($salary->id, collect())
                     ->map(fn ($row) => [
@@ -704,6 +708,51 @@ class PayrollGenerationService
         }
 
         return [$basicPay, $allowancePay];
+    }
+
+    /**
+     * Adds to each salary segment what it contributed to this payroll, for
+     * the breakdown: days_worked, worked_minutes, basic_pay, and the wage
+     * order or adjustment that set its salary (source). Pay is computed the
+     * same way as proratedPay(), so the lines add up to basic_pay.
+     */
+    private function describeSegments(array $segments, string $rateType, float $perMonth, Collection $logs, string $start, string $end): array
+    {
+        $cutoffDays = max(1, $this->daysBetween($start, $end));
+
+        $sources = \Illuminate\Support\Facades\DB::table('salary_adjustments')
+            ->leftJoin('wage_orders', 'wage_orders.id', '=', 'salary_adjustments.wage_order_id')
+            ->whereIn('salary_adjustments.id', collect($segments)->pluck('salary_adjustment_id')->filter()->all())
+            ->get(['salary_adjustments.id', 'salary_adjustments.adjustment_type', 'wage_orders.order_no'])
+            ->keyBy('id');
+
+        return collect($segments)->map(function (array $segment) use ($rateType, $perMonth, $logs, $cutoffDays, $sources) {
+            $inside = $logs->filter(function ($log) use ($segment) {
+                $date = $log->work_date?->format('Y-m-d');
+
+                return $date !== null && $date >= $segment['from'] && $date <= $segment['to'];
+            });
+
+            $daysWorked = $inside->filter(fn ($log) => $log->time_in && $log->time_out)->count();
+            $minutes = (int) $inside->sum('worked_minutes');
+
+            $pay = match ($rateType) {
+                'daily' => $daysWorked * $segment['basic'],
+                'hourly' => $minutes / 60 * $segment['basic'],
+                default => $segment['basic'] / $perMonth * ($segment['days'] / $cutoffDays),
+            };
+
+            $source = $segment['salary_adjustment_id'] ? $sources->get($segment['salary_adjustment_id']) : null;
+
+            return $segment + [
+                'days_worked' => $daysWorked,
+                'worked_minutes' => $minutes,
+                'basic_pay' => round($pay, 2),
+                'source' => $source
+                    ? ($source->order_no ? "Wage order {$source->order_no}" : 'Salary adjustment #'.$segment['salary_adjustment_id'])
+                    : null,
+            ];
+        })->values()->all();
     }
 
     private function daysBetween(string $from, string $to): int
