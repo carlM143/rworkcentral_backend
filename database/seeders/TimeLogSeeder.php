@@ -9,16 +9,32 @@ use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Seeder;
 
+/**
+ * Sample attendance for the RWEB employees of EmployeeSeeder
+ * (emp_id 1001–1019), November 1–25, 2026.
+ *
+ * Re-running is safe: logs are matched by employee and date. Sample logs that
+ * no longer belong (other employees, dates outside the range, no-work dates)
+ * are removed so the data matches the client's employee list.
+ */
 class TimeLogSeeder extends Seeder
 {
-    private const START_DATE = '2026-10-26';
-    private const END_DATE = '2026-11-17';
+    private const START_DATE = '2026-11-01';
+    private const END_DATE = '2026-11-25';
+
+    /** Employees seeded by EmployeeSeeder (RWEB list). */
+    private const FIRST_EMP_ID = 1001;
+    private const LAST_EMP_ID = 1019;
+
+    private const SAMPLE_REMARKS = 'Sample attendance for payroll testing.';
 
     /**
-     * Dates nobody worked (e.g. a non-working holiday), so no time logs are created.
-     * Nov 2, 2026 — All Souls' Day.
+     * Dates nobody worked (non-working holidays), so no time logs are created.
+     * Nov 1, 2026 — All Saints' Day (also a Sunday)
+     * Nov 2, 2026 — All Souls' Day
      */
     private const NO_WORK_DATES = [
+        '2026-11-01',
         '2026-11-02',
     ];
 
@@ -42,12 +58,13 @@ class TimeLogSeeder extends Seeder
     {
         $employees = Employee::query()
             ->where('status', true)
+            ->whereBetween('emp_id', [self::FIRST_EMP_ID, self::LAST_EMP_ID])
             ->with('latestEmployment.workSchedule.days')
-            ->orderBy('id')
+            ->orderBy('emp_id')
             ->get();
 
         if ($employees->isEmpty()) {
-            $this->command?->warn('No active employees found. Run EmployeeSeeder first.');
+            $this->command?->warn('No RWEB employees (emp_id 1001–1019) found. Run EmployeeSeeder first.');
             return;
         }
 
@@ -57,11 +74,15 @@ class TimeLogSeeder extends Seeder
 
         $dates = collect(CarbonPeriod::create(self::START_DATE, '1 day', self::END_DATE))->values();
 
-        // Remove seeded logs left on no-work dates from an earlier run
+        // Sample logs that no longer belong: other employees, outside the range, or no-work dates
         $removed = TimeLog::query()
-            ->whereIn('employee_id', $employees->pluck('id'))
-            ->whereIn('work_date', self::NO_WORK_DATES)
-            ->where('remarks', 'Sample attendance for payroll testing.')
+            ->where('remarks', self::SAMPLE_REMARKS)
+            ->where(function ($q) use ($employees) {
+                $q->whereNotIn('employee_id', $employees->pluck('id'))
+                    ->orWhere('work_date', '<', self::START_DATE)
+                    ->orWhere('work_date', '>', self::END_DATE)
+                    ->orWhereIn('work_date', self::NO_WORK_DATES);
+            })
             ->delete();
 
         $created = 0;
@@ -79,11 +100,22 @@ class TimeLogSeeder extends Seeder
                 continue;
             }
 
+            // No attendance before the employee was hired
+            $hired = $employee->latestEmployment?->date_hired
+                ? Carbon::parse($employee->latestEmployment->date_hired)->toDateString()
+                : null;
+
             $days = $schedule->days->keyBy('day_of_week');
             $grace = (int) ($schedule->grace_period ?? 0);
 
             foreach ($dates as $dayIndex => $date) {
-                if (in_array($date->toDateString(), self::NO_WORK_DATES, true)) {
+                $workDate = $date->toDateString();
+
+                if (in_array($workDate, self::NO_WORK_DATES, true)) {
+                    continue;
+                }
+
+                if ($hired && $workDate < $hired) {
                     continue;
                 }
 
@@ -94,13 +126,13 @@ class TimeLogSeeder extends Seeder
                 }
 
                 $log = $this->buildLog(
-                    $date->toDateString(),
+                    $workDate,
                     substr($day->time_in, 0, 5),
                     substr($day->time_out, 0, 5),
                     $grace,
                     match (true) {
-                        $employeeIndex === 0 && $date->toDateString() === self::UNDERTIME_DATE => 'undertime',
-                        $employeeIndex === 1 && $date->toDateString() === self::MISSING_TIME_OUT_DATE => 'missing_time_out',
+                        $employeeIndex === 0 && $workDate === self::UNDERTIME_DATE => 'undertime',
+                        $employeeIndex === 1 && $workDate === self::MISSING_TIME_OUT_DATE => 'missing_time_out',
                         default => $this->scenario($employeeIndex, $dayIndex),
                     },
                     $employeeIndex + $dayIndex
@@ -109,7 +141,7 @@ class TimeLogSeeder extends Seeder
                 $record = TimeLog::updateOrCreate(
                     [
                         'employee_id' => $employee->id,
-                        'work_date' => $date->toDateString(),
+                        'work_date' => $workDate,
                     ],
                     [
                         ...$log,
@@ -117,7 +149,7 @@ class TimeLogSeeder extends Seeder
                         'grace_period_minutes' => $grace,
                         'overtime_minutes' => 0,
                         'source' => 'manual',
-                        'remarks' => 'Sample attendance for payroll testing.',
+                        'remarks' => self::SAMPLE_REMARKS,
                     ]
                 );
 
@@ -129,7 +161,8 @@ class TimeLogSeeder extends Seeder
         $skipped = implode(', ', self::NO_WORK_DATES);
 
         $this->command?->info(
-            "Time logs seeded ({$range}, no logs on {$skipped}): {$created} created, {$updated} updated, {$removed} removed."
+            "Time logs seeded for {$employees->count()} employees ({$range}, no logs on {$skipped}): "
+            . "{$created} created, {$updated} updated, {$removed} removed."
         );
     }
 

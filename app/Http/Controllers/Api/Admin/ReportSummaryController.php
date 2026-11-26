@@ -38,6 +38,9 @@ class ReportSummaryController extends Controller
         if ($can('thirteenth_month.view')) {
             $data['thirteenth_month'] = $this->safe(fn () => $this->thirteenthMonth());
         }
+        if ($can('withholding_tax.view')) {
+            $data['withholding_tax'] = $this->safe(fn () => $this->withholdingTax());
+        }
         if ($can('wage_compliance.view')) {
             $data['wage_compliance'] = $this->safe(fn () => $this->wageCompliance($request));
         }
@@ -123,6 +126,29 @@ class ReportSummaryController extends Controller
             'headline' => '₱'.number_format(((float) $earned) / 12, 2).' accrued in '.$year,
             'detail' => $days >= 0 ? "Pay by Dec 24 · {$days} day(s) left" : 'Deadline (Dec 24) has passed',
             'state' => $days >= 0 && $days <= 30 ? 'warn' : 'info',
+        ];
+    }
+
+    private function withholdingTax(): array
+    {
+        $latest = DB::table('payrolls')
+            ->join('payroll_periods', 'payroll_periods.id', '=', 'payrolls.payroll_period_id')
+            ->max('payroll_periods.cutoff_end');
+
+        if (! $latest) {
+            return ['headline' => 'No payroll yet', 'detail' => 'Tax is computed when payroll is generated.', 'state' => 'empty'];
+        }
+
+        $month = Carbon::parse($latest)->startOfMonth();
+        $tax = DB::table('payrolls')
+            ->join('payroll_periods', 'payroll_periods.id', '=', 'payrolls.payroll_period_id')
+            ->whereBetween('payroll_periods.cutoff_end', [$month->toDateString(), $month->copy()->endOfMonth()->toDateString()])
+            ->sum('payrolls.withholding_tax');
+
+        return [
+            'headline' => $month->format('F Y'),
+            'detail' => '₱'.number_format((float) $tax, 2).' withheld · file BIR 1601-C by the 10th of next month',
+            'state' => 'info',
         ];
     }
 

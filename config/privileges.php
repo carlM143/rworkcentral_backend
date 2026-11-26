@@ -124,6 +124,7 @@ return [
                 ],
                 'history' => ['label' => 'Payroll History', 'actions' => ['view', 'export']],
                 'payslips' => ['label' => 'Payslips', 'actions' => ['view', 'export']],
+                'withholding_tax' => ['label' => 'Withholding Tax', 'actions' => ['view', 'edit'], 'notes' => 'BIR tax tables, MWE exemption and taxable allowances.'],
             ],
         ],
 
@@ -203,11 +204,6 @@ return [
             'label' => 'Approval Center',
             'icon' => 'clipboard-check',
             'features' => [
-                'first_level' => [
-                    'label' => 'For My Approval',
-                    'actions' => ['view', 'approve'],
-                    'notes' => 'Supervisor (first-level) approval of employee requests, before HR.',
-                ],
                 'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
@@ -254,6 +250,7 @@ return [
                 'thirteenth_month' => ['label' => '13th Month Pay', 'actions' => ['view', 'export']],
                 'government' => ['label' => 'SSS, Pag-IBIG & PhilHealth Reports', 'actions' => ['view', 'export']],
                 'wage_compliance' => ['label' => 'Wage Compliance', 'actions' => ['view', 'export']],
+                'withholding_tax' => ['label' => 'Withholding Tax Report', 'actions' => ['view', 'export']],
             ],
         ],
 
@@ -303,12 +300,10 @@ return [
             'settings:qr.*',
         ],
         // Supervisors and managers sign in to the admin portal and see only
-        // "For My Approval" (first-level approval of employee requests).
         'Manager' => [
             'portal:admin',
             'portal:employee',
             'employee_portal:*',
-            'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
         ],
@@ -316,7 +311,6 @@ return [
             'portal:admin',
             'portal:employee',
             'employee_portal:*',
-            'approvals:first_level.*',
             'timekeeping:correction.request',
             'timekeeping:adjustment.request',
         ],

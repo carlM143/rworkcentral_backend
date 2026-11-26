@@ -11,6 +11,9 @@ class DepartmentSeeder extends Seeder
 {
     /**
      * Seed the application's departments.
+     *
+     * Office/Department codes follow the client's RBDB list (RWS, OPR, FAD,
+     * RWEB). Airpro (AR) is kept for the existing driver and demo seeders.
      */
     public function run(): void
     {
@@ -19,6 +22,9 @@ class DepartmentSeeder extends Seeder
 
         $departments = [
             ['name' => 'R Web Solutions', 'code' => 'RWS'],
+            ['name' => 'Operations', 'code' => 'OPR'],
+            ['name' => 'Finance and Administration', 'code' => 'FAD'],
+            ['name' => 'Executive Office', 'code' => 'RWEB'],
             ['name' => 'Airpro', 'code' => 'AR'],
         ];
 

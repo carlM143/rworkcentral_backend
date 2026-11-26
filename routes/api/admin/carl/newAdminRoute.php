@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\Admin\PayrollReportController;
 use App\Http\Controllers\Api\Admin\ContributionReportController;
 use App\Http\Controllers\Api\Admin\ThirteenthMonthReportController;
 use App\Http\Controllers\Api\Admin\ReportSummaryController;
+use App\Http\Controllers\Api\Admin\WithholdingTaxController;
+use App\Http\Controllers\Api\Admin\WithholdingTaxReportController;
 
 // ============================================
 // WORK FROM HOME: REQUESTS
@@ -182,19 +184,10 @@ Route::put('roles/{role}/privileges', [RoleController::class, 'updatePrivileges'
 Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('privilege:settings,roles.delete');
 
 // ============================================
-// APPROVAL CENTER: FOR MY APPROVAL (supervisors)
+// APPROVAL CENTER: SUPERVISOR COLUMN (HR approval pages)
 // ============================================
 
-Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index'])
-    ->middleware('privilege:approvals,first_level.view');
-Route::patch('supervisor-approvals/{type}/{id}/approve', [SupervisorApprovalController::class, 'approve'])
-    ->middleware('privilege:approvals,first_level.approve')
-    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
-Route::patch('supervisor-approvals/{type}/{id}/reject', [SupervisorApprovalController::class, 'reject'])
-    ->middleware('privilege:approvals,first_level.approve')
-    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
-
-// For HR's approval pages: supervisor names, and "Approve anyway"
+// Supervisor names, and "Approve anyway"
 Route::get('supervisor-approvals/approvers', [SupervisorApprovalController::class, 'approvers']);
 Route::patch('supervisor-approvals/{type}/{id}/override', [SupervisorApprovalController::class, 'override'])
     ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
@@ -242,3 +235,27 @@ Route::get('reports/thirteenth-month', [ThirteenthMonthReportController::class, 
 
 Route::get('reports/summary', [ReportSummaryController::class, 'index'])
     ->middleware('privilege:reports,center.view');    
+
+// ============================================
+// PAYROLL: WITHHOLDING TAX (BIR)
+// ============================================
+
+Route::get('withholding-tax', [WithholdingTaxController::class, 'index'])
+    ->middleware('privilege:payroll,withholding_tax.view');
+Route::post('withholding-tax/calculate', [WithholdingTaxController::class, 'calculate'])
+    ->middleware('privilege:payroll,withholding_tax.view');
+Route::post('withholding-tax/tables', [WithholdingTaxController::class, 'store'])
+    ->middleware('privilege:payroll,withholding_tax.edit');
+Route::put('withholding-tax/tables/{id}', [WithholdingTaxController::class, 'update'])
+    ->middleware('privilege:payroll,withholding_tax.edit')->whereNumber('id');
+Route::delete('withholding-tax/tables/{id}', [WithholdingTaxController::class, 'destroy'])
+    ->middleware('privilege:payroll,withholding_tax.edit')->whereNumber('id');
+Route::put('withholding-tax/settings', [WithholdingTaxController::class, 'updateSettings'])
+    ->middleware('privilege:payroll,withholding_tax.edit');
+
+// ============================================
+// REPORTS: WITHHOLDING TAX (BIR 1601-C)
+// ============================================
+
+Route::get('reports/withholding-tax', [WithholdingTaxReportController::class, 'index'])
+    ->middleware('privilege:reports,withholding_tax.view');

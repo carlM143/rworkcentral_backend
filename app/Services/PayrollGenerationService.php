@@ -37,7 +37,8 @@ class PayrollGenerationService
     ];
 
     public function __construct(
-        private readonly HolidayPayService $holidayPay
+        private readonly HolidayPayService $holidayPay,
+        private readonly WithholdingTaxService $withholdingTax
     ) {
     }
 
@@ -306,6 +307,8 @@ class PayrollGenerationService
                     ->values()
                     ->all();
 
+                // Main allowance alone, before the additional allowances (withholding tax).
+                $mainAllowancePay = $allowancePay;
                 $allowancePay += collect($extraLines)->sum('amount');
 
                 $lateMinutes = (int) $logs->sum(fn ($log) => $this->lateMinutes($log));
@@ -367,7 +370,23 @@ class PayrollGenerationService
 
                 $contributionsTotal = collect($contributions)->sum('employee_share');
 
-                $available = max(0, $gross - $contributionsTotal);
+                // Withholding tax (BIR): after contributions, before loans.
+                $taxResult = $this->withholdingTax->compute([
+                    'employee_id' => $employee->id,
+                    'frequency' => $frequency,
+                    'date' => $end,
+                    'daily_rate' => (float) $dailyRate,
+                    'basic' => (float) $basicPay,
+                    'overtime' => (float) $overtimePay,
+                    'holiday' => (float) $holidayPay,
+                    'main_allowance' => (float) $mainAllowancePay,
+                    'extra_allowances' => $extraLines,
+                    'attendance_deductions' => (float) ($lateDeduction + $undertimeDeduction + $leaveDeduction + $unpaidHolidayDeduction),
+                    'contributions' => (float) $contributionsTotal,
+                ]);
+                $tax = min($taxResult['tax'], max(0, $gross - $contributionsTotal));
+
+                $available = max(0, $gross - $contributionsTotal - $tax);
                 $loanLines = [];
 
                 foreach ($loans->get($employee->id, collect()) as $loan) {
@@ -406,7 +425,6 @@ class PayrollGenerationService
                 }
 
                 $loanTotal = collect($loanLines)->sum('amount');
-                $tax = 0;
                 $totalDeductions = $contributionsTotal + $loanTotal + $tax;
                 $net = $gross - $totalDeductions;
 
@@ -456,6 +474,7 @@ class PayrollGenerationService
                         'holiday_days' => $holidayDays,
                         'salary_segments' => $segments,
                         'additional_allowances' => $extraLines,
+                        'tax' => $taxResult['detail'],
                         'incomplete_logs' => $incompleteLogs,
                     ],
                     'generated_by' => $userId,

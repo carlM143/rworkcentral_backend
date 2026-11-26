@@ -4,7 +4,6 @@ namespace Database\Seeders;
 
 use App\Models\Company;
 use App\Models\ContactInformation;
-use App\Models\ContactPerson;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Employment;
@@ -22,15 +21,27 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
+/**
+ * RWEB employees, from the client's lists:
+ *   - "Employee List - RWEB.xlsx"       birthday and contact number
+ *   - "sample_compensation_template"    name, position, rank, department,
+ *                                        location, status, date hired (updated)
+ *
+ * Salary and allowances are left empty: the client has not given the amounts
+ * yet (fill them in Employees › Salary Rates, or update this seeder).
+ * Rank and date of latest appointment are kept here for reference; the
+ * employees table has no columns for them yet.
+ */
 class EmployeeSeeder extends Seeder
 {
     private const DEFAULT_PASSWORD = 'password123';
     private const EMAIL_DOMAIN = 'rworkcentral.test';
     private const EMPLOYEE_ROLE = 'Employee';
 
+    /** Work locations from the RBDB list, with their minimum wage region. */
     private const LOCATIONS = [
-        'Davao' => ['city' => 'Davao City', 'province' => 'Davao del Sur'],
-        'Manila' => ['city' => 'Manila', 'province' => 'Metro Manila'],
+        'DAVAO-HO' => ['city' => 'Davao City', 'province' => 'Davao del Sur', 'region_code' => 'XI'],
+        'PASIG' => ['city' => 'Pasig City', 'province' => 'Metro Manila', 'region_code' => 'NCR'],
     ];
 
     public function run(): void
@@ -38,13 +49,13 @@ class EmployeeSeeder extends Seeder
         $company = Company::where('company_name', 'R Work Central')->firstOrFail();
         $defaultSchedule = WorkSchedule::where('schedule_code', 'WS-001')->first();
         $employeeRoleId = $this->employeeRoleId();
-        $salaryTypes = SalaryType::pluck('id', 'type_name');
+        $monthlyTypeId = SalaryType::where('type_name', 'Monthly')->value('id');
 
         $locations = collect(self::LOCATIONS)
             ->mapWithKeys(fn ($details, $name) => [$name => $this->ensureLocation($company, $name, $details)]);
 
         foreach ($this->employees() as $item) {
-            DB::transaction(function () use ($item, $company, $defaultSchedule, $employeeRoleId, $locations, $salaryTypes) {
+            DB::transaction(function () use ($item, $company, $defaultSchedule, $employeeRoleId, $locations, $monthlyTypeId) {
                 $department = Department::where('company_id', $company->id)
                     ->where('department_code', $item['department_code'])
                     ->firstOrFail();
@@ -84,9 +95,9 @@ class EmployeeSeeder extends Seeder
                         'suffix' => $item['suffix'],
                         'profile_photo' => null,
                         'age' => Carbon::parse($item['birthday'])->age,
-                        'gender' => $item['gender'],
+                        'gender' => null,       // not in the client's list
                         'birthday' => $item['birthday'],
-                        'civil_status' => $item['civil_status'],
+                        'civil_status' => null, // not in the client's list
                         'status' => true,
                     ]
                 );
@@ -99,9 +110,9 @@ class EmployeeSeeder extends Seeder
                         'location_id' => $locations[$item['location']]->id,
                         'position_id' => $position->id,
                         'work_schedule_id' => $defaultSchedule?->id,
-                        'date_hired' => now()->subMonths($item['hired_months_ago'])->toDateString(),
+                        'date_hired' => $item['date_hired'],
                         'mobile' => $item['mobile'],
-                        'residential_address' => $item['residential_address'],
+                        'residential_address' => '', // not in the client's list
                     ]
                 );
 
@@ -110,26 +121,20 @@ class EmployeeSeeder extends Seeder
                     [
                         'email' => $email,
                         'mobile' => $item['mobile'],
-                        'residential_address' => $item['residential_address'],
+                        'residential_address' => '', // not in the client's list
                     ]
                 );
 
-                ContactPerson::updateOrCreate(
-                    ['employee_id' => $employee->id],
-                    $item['contact_person']
-                );
-
-                $salary = $item['salary'];
-
-                SalarySetup::updateOrCreate(
+                // Salary and allowances: amounts not given yet by the client.
+                SalarySetup::firstOrCreate(
                     ['employee_id' => $employee->id],
                     [
-                        'salary_type_id' => $salaryTypes[$salary['type']] ?? null,
-                        'basic_salary' => $salary['basic_salary'],
-                        'allowance' => $salary['allowance'] ?? null,
-                        'bank_name' => $salary['bank_name'],
-                        'account_name' => $salary['bank_name'] ? $fullName : null,
-                        'account_number' => $salary['account_number'],
+                        'salary_type_id' => $monthlyTypeId,
+                        'basic_salary' => null,
+                        'allowance' => null,
+                        'bank_name' => null,
+                        'account_name' => null,
+                        'account_number' => null,
                     ]
                 );
             });
@@ -162,7 +167,8 @@ class EmployeeSeeder extends Seeder
 
     private function ensureLocation(Company $company, string $name, array $details): Location
     {
-        $hasCompany = Schema::hasColumn((new Location())->getTable(), 'company_id');
+        $table = (new Location())->getTable();
+        $hasCompany = Schema::hasColumn($table, 'company_id');
 
         $query = Location::where('location_name', $name);
 
@@ -182,6 +188,14 @@ class EmployeeSeeder extends Seeder
             $location->forceFill(['company_id' => $company->id]);
         }
 
+        // Minimum wage region (Compensation › Regional Rates)
+        if (Schema::hasColumn($table, 'region_code')) {
+            $location->forceFill([
+                'region_code' => $details['region_code'],
+                'wage_classification' => 'non_agriculture',
+            ]);
+        }
+
         $location->save();
 
         return $location;
@@ -190,334 +204,309 @@ class EmployeeSeeder extends Seeder
     private function employees(): array
     {
         return [
-            // DAVAO — R Web Solutions (2)
             [
                 'emp_id' => 1001,
                 'firstname' => 'Roger',
-                'middlename' => null,
+                'middlename' => 'Candilasa',
                 'lastname' => 'Perez',
                 'suffix' => 'Jr.',
                 'birthday' => '2003-01-28',
-                'gender' => 'Male',
-                'civil_status' => 'Single',
-                'employment_type' => 'Probationary',
+                'employment_type' => 'Regular',
                 'department_code' => 'RWS',
                 'position' => 'Web Developer',
-                'location' => 'Davao',
-                'hired_months_ago' => 1,
-                'mobile' => '09171234567',
-                'residential_address' => 'Buhangin, Davao City',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 22000,
-                    'bank_name' => 'BDO',
-                    'account_number' => '0012345678901',
-                ],
-                'contact_person' => [
-                    'name' => 'Marian Perez',
-                    'relationship' => 'Sister',
-                    'contact_number' => '09843784737',
-                    'address' => 'Buhangin, Davao City',
-                ],
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-04-25',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09202415379',
             ],
             [
-                'emp_id' => 1002,
-                'firstname' => 'Maria',
-                'middlename' => 'Lopez',
-                'lastname' => 'Santos',
+                'emp_id' => 1002, // company ID 2
+                'firstname' => 'Alyzza',
+                'middlename' => 'Papa',
+                'lastname' => 'Escalante',
                 'suffix' => null,
-                'birthday' => '1998-06-14',
-                'gender' => 'Female',
-                'civil_status' => 'Single',
+                'birthday' => '1997-09-14',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWEB',
+                'position' => 'General Manager',
+                'rank' => 'Executive',
+                'location' => 'PASIG',
+                'date_hired' => '2019-07-16',
+                'date_of_latest_appointment' => '2026-09-26',
+                'mobile' => '09151016998',
+            ],
+            [
+                'emp_id' => 1003, // company ID 00-24
+                'firstname' => 'Gil Dominic',
+                'middlename' => 'Aro',
+                'lastname' => 'Gone',
+                'suffix' => null,
+                'birthday' => '1995-03-31',
                 'employment_type' => 'Regular',
                 'department_code' => 'RWS',
-                'position' => 'Project Coordinator',
-                'location' => 'Davao',
-                'hired_months_ago' => 20,
-                'mobile' => '09181234567',
-                'residential_address' => 'Matina, Davao City',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 28000,
-                    'allowance' => 500,
-                    'bank_name' => 'BPI',
-                    'account_number' => '3456789012',
-                ],
-                'contact_person' => [
-                    'name' => 'Jose Santos',
-                    'relationship' => 'Father',
-                    'contact_number' => '09192345678',
-                    'address' => 'Matina, Davao City',
-                ],
+                'position' => 'Asst. Graphic Designer Supervisor',
+                'rank' => 'Supervisory',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2023-06-26',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09773157341',
             ],
-
-            // DAVAO — Airpro (3)
             [
-                'emp_id' => 1003,
-                'firstname' => 'Carlo',
-                'middlename' => 'Reyes',
-                'lastname' => 'Mendoza',
+                'emp_id' => 1004, // company ID 00-28
+                'firstname' => 'Queen Gianna Claire',
+                'middlename' => 'Maybanting',
+                'lastname' => 'Palmes',
                 'suffix' => null,
-                'birthday' => '1995-11-08',
-                'gender' => 'Male',
-                'civil_status' => 'Married',
+                'birthday' => '2000-07-16',
                 'employment_type' => 'Regular',
-                'department_code' => 'AR',
-                'position' => 'Lead Technician',
-                'location' => 'Davao',
-                'hired_months_ago' => 28,
-                'mobile' => '09173456789',
-                'residential_address' => 'Toril, Davao City',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 30000,
-                    'bank_name' => 'Metrobank',
-                    'account_number' => '1234567890123',
-                ],
-                'contact_person' => [
-                    'name' => 'Ana Mendoza',
-                    'relationship' => 'Wife',
-                    'contact_number' => '09201234567',
-                    'address' => 'Toril, Davao City',
-                ],
+                'department_code' => 'RWS',
+                'position' => 'Operations Supervisor',
+                'rank' => 'Supervisory',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2023-11-15',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09070101032',
             ],
             [
-                'emp_id' => 1004,
-                'firstname' => 'Angela',
-                'middlename' => 'Mae',
-                'lastname' => 'Flores',
+                'emp_id' => 1005, // company ID 00-27
+                'firstname' => 'Rose',
+                'middlename' => 'Esteban',
+                'lastname' => 'Rivera',
                 'suffix' => null,
-                'birthday' => '1997-09-21',
-                'gender' => 'Female',
-                'civil_status' => 'Single',
+                'birthday' => '2001-02-01',
                 'employment_type' => 'Regular',
-                'department_code' => 'AR',
-                'position' => 'Field Technician',
-                'location' => 'Davao',
-                'hired_months_ago' => 36,
-                'mobile' => '09175678901',
-                'residential_address' => 'Lanang, Davao City',
-                'salary' => [
-                    'type' => 'Daily',
-                    'basic_salary' => 750,
-                    'bank_name' => 'Landbank',
-                    'account_number' => '9876543210',
-                ],
-                'contact_person' => [
-                    'name' => 'Lorna Flores',
-                    'relationship' => 'Mother',
-                    'contact_number' => '09351234567',
-                    'address' => 'Lanang, Davao City',
-                ],
+                'department_code' => 'RWS',
+                'position' => 'Operations Supervisor',
+                'rank' => 'Supervisory',
+                'location' => 'PASIG',
+                'date_hired' => '2023-12-04',
+                'date_of_latest_appointment' => '2026-09-26',
+                'mobile' => '09706059087',
             ],
             [
-                'emp_id' => 1005,
-                'firstname' => 'Mark',
-                'middlename' => 'Dizon',
-                'lastname' => 'Villanueva',
+                'emp_id' => 1006, // company ID 00-31
+                'firstname' => 'Nicolle Angelie',
+                'middlename' => 'Bacani',
+                'lastname' => 'Gacayan',
                 'suffix' => null,
-                'birthday' => '2001-04-03',
-                'gender' => 'Male',
-                'civil_status' => 'Single',
-                'employment_type' => 'Probationary',
-                'department_code' => 'AR',
-                'position' => 'Junior Technician',
-                'location' => 'Davao',
-                'hired_months_ago' => 3,
-                'mobile' => '09176789012',
-                'residential_address' => 'Bajada, Davao City',
-                'salary' => [
-                    'type' => 'Daily',
-                    'basic_salary' => 610,
-                    'bank_name' => null,
-                    'account_number' => null,
-                ],
-                'contact_person' => [
-                    'name' => 'Rosa Villanueva',
-                    'relationship' => 'Mother',
-                    'contact_number' => '09361234567',
-                    'address' => 'Bajada, Davao City',
-                ],
+                'birthday' => '2001-11-06',
+                'employment_type' => 'Regular',
+                'department_code' => 'OPR',
+                'position' => 'UI/UX & System Designer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2024-06-10',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09773546170',
             ],
-
-            // MANILA — R Web Solutions (3)
             [
-                'emp_id' => 1006,
-                'firstname' => 'Kristine',
-                'middlename' => 'Gomez',
-                'lastname' => 'Bautista',
+                'emp_id' => 1007, // company ID 00-34
+                'firstname' => 'Anthony',
+                'middlename' => 'Moring',
+                'lastname' => 'Algabre',
                 'suffix' => null,
-                'birthday' => '1996-02-17',
-                'gender' => 'Female',
-                'civil_status' => 'Married',
+                'birthday' => '2001-10-10',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWS',
+                'position' => 'Senior Technical Lead',
+                'rank' => 'Supervisory',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2024-06-10',
+                'date_of_latest_appointment' => '2026-09-30',
+                'mobile' => '09662457483',
+            ],
+            [
+                'emp_id' => 1008, // company ID 00-39
+                'firstname' => 'Mark Jhon Lloyd',
+                'middlename' => 'Seda',
+                'lastname' => 'Jandulong',
+                'suffix' => null,
+                'birthday' => '2001-08-30',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWS',
+                'position' => 'Content Writer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'PASIG',
+                'date_hired' => '2025-02-03',
+                'date_of_latest_appointment' => '2026-09-26',
+                'mobile' => '09560957375',
+            ],
+            [
+                'emp_id' => 1009, // company ID 00-41
+                'firstname' => 'Maviel May',
+                'middlename' => 'Haus',
+                'lastname' => 'Segurog',
+                'suffix' => null,
+                'birthday' => '2002-05-26',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWS',
+                'position' => 'Asst. Sales Supervisor',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2025-05-14',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09124824257',
+            ],
+            [
+                'emp_id' => 1010, // company ID 00-43
+                'firstname' => 'Kent Joemar',
+                'middlename' => 'Luna',
+                'lastname' => 'Escoto',
+                'suffix' => null,
+                'birthday' => '2003-10-10',
                 'employment_type' => 'Regular',
                 'department_code' => 'RWS',
                 'position' => 'UI/UX Designer',
-                'location' => 'Manila',
-                'hired_months_ago' => 14,
-                'mobile' => '09177890123',
-                'residential_address' => 'Sampaloc, Manila',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 35000,
-                    'bank_name' => 'BDO',
-                    'account_number' => '0098765432109',
-                ],
-                'contact_person' => [
-                    'name' => 'Paolo Bautista',
-                    'relationship' => 'Husband',
-                    'contact_number' => '09371234567',
-                    'address' => 'Sampaloc, Manila',
-                ],
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2025-10-07',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09507541450',
             ],
             [
-                'emp_id' => 1007,
-                'firstname' => 'Joshua',
-                'middlename' => 'Tan',
-                'lastname' => 'Ramos',
+                'emp_id' => 1011, // company ID 00-46
+                'firstname' => 'Keefe Benedict',
+                'middlename' => 'Batulan',
+                'lastname' => 'Patosa',
                 'suffix' => null,
-                'birthday' => '2000-12-05',
-                'gender' => 'Male',
-                'civil_status' => 'Single',
-                'employment_type' => 'Probationary',
-                'department_code' => 'RWS',
-                'position' => 'Software Developer',
-                'location' => 'Manila',
-                'hired_months_ago' => 4,
-                'mobile' => '09178901234',
-                'residential_address' => 'Ermita, Manila',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 25000,
-                    'bank_name' => 'UnionBank',
-                    'account_number' => '109876543210',
-                ],
-                'contact_person' => [
-                    'name' => 'Linda Ramos',
-                    'relationship' => 'Mother',
-                    'contact_number' => '09381234567',
-                    'address' => 'Ermita, Manila',
-                ],
-            ],
-            [
-                'emp_id' => 1008,
-                'firstname' => 'Patricia',
-                'middlename' => 'Cruz',
-                'lastname' => 'Garcia',
-                'suffix' => null,
-                'birthday' => '1990-08-29',
-                'gender' => 'Female',
-                'civil_status' => 'Married',
+                'birthday' => '2002-10-23',
                 'employment_type' => 'Regular',
                 'department_code' => 'RWS',
-                'position' => 'Web Development Manager',
-                'location' => 'Manila',
-                'hired_months_ago' => 50,
-                'mobile' => '09179012345',
-                'residential_address' => 'Malate, Manila',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 60000,
-                    'allowance' => 500,
-                    'bank_name' => 'BPI',
-                    'account_number' => '8765432109',
-                ],
-                'contact_person' => [
-                    'name' => 'Ramon Garcia',
-                    'relationship' => 'Husband',
-                    'contact_number' => '09391234567',
-                    'address' => 'Malate, Manila',
-                ],
-            ],
-
-            // MANILA — Airpro (2)
-            [
-                'emp_id' => 1009,
-                'firstname' => 'Daniel',
-                'middlename' => 'Santiago',
-                'lastname' => 'Aquino',
-                'suffix' => null,
-                'birthday' => '1999-03-11',
-                'gender' => 'Male',
-                'civil_status' => 'Single',
-                'employment_type' => 'Probationary',
-                'department_code' => 'AR',
-                'position' => 'IT Support Specialist',
-                'location' => 'Manila',
-                'hired_months_ago' => 2,
-                'mobile' => '09170123456',
-                'residential_address' => 'Tondo, Manila',
-                'salary' => [
-                    'type' => 'Monthly',
-                    'basic_salary' => 24000,
-                    'bank_name' => 'Security Bank',
-                    'account_number' => '0000123456789',
-                ],
-                'contact_person' => [
-                    'name' => 'Teresa Aquino',
-                    'relationship' => 'Mother',
-                    'contact_number' => '09401234567',
-                    'address' => 'Tondo, Manila',
-                ],
+                'position' => 'Asst. Supervisor - Web Dev',
+                'rank' => 'Supervisory',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2025-09-18',
+                'date_of_latest_appointment' => '2026-09-30',
+                'mobile' => '09453426009',
             ],
             [
-                'emp_id' => 1010,
-                'firstname' => 'Bea',
-                'middlename' => 'Navarro',
-                'lastname' => 'Castillo',
-                'suffix' => null,
-                'birthday' => '2002-07-24',
-                'gender' => 'Female',
-                'civil_status' => 'Single',
-                'employment_type' => 'Probationary',
-                'department_code' => 'AR',
-                'position' => 'Field Technician',
-                'location' => 'Manila',
-                'hired_months_ago' => 5,
-                'mobile' => '09171357924',
-                'residential_address' => 'Paco, Manila',
-                'salary' => [
-                    'type' => 'Daily',
-                    'basic_salary' => 695,
-                    'bank_name' => 'Metrobank',
-                    'account_number' => '3210987654321',
-                ],
-                'contact_person' => [
-                    'name' => 'Edgar Castillo',
-                    'relationship' => 'Father',
-                    'contact_number' => '09411234567',
-                    'address' => 'Paco, Manila',
-                ],
-            ],
-                        // DRIVER — Airpro
-            [
-                'emp_id' => 1011,
-                'firstname' => 'Ramon',
-                'middlename' => 'Delos Reyes',
-                'lastname' => 'Torres',
-                'suffix' => null,
-                'birthday' => '1988-05-19',
-                'gender' => 'Male',
-                'civil_status' => 'Married',
+                'emp_id' => 1012, // company ID 00-47
+                'firstname' => 'Eric',
+                'middlename' => 'Miguel',
+                'lastname' => 'Ramones',
+                'suffix' => 'Jr.',
+                'birthday' => '2003-09-12',
                 'employment_type' => 'Regular',
-                'department_code' => 'AR',
-                'position' => 'Driver',
-                'location' => 'Davao',
-                'hired_months_ago' => 18,
-                'mobile' => '09172468135',
-                'residential_address' => 'Panacan, Davao City',
-                'salary' => [
-                    'type' => 'Daily',
-                    'basic_salary' => 650,
-                    'bank_name' => 'Landbank',
-                    'account_number' => '5544332211',
-                ],
-                'contact_person' => [
-                    'name' => 'Luz Torres',
-                    'relationship' => 'Wife',
-                    'contact_number' => '09421234567',
-                    'address' => 'Panacan, Davao City',
-                ],
+                'department_code' => 'RWS',
+                'position' => 'Graphic Designer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2025-09-18',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09087337926',
+            ],
+            [
+                'emp_id' => 1013, // company ID 00-48
+                'firstname' => 'Keren Happuch',
+                'middlename' => 'Cifra',
+                'lastname' => 'Lanado',
+                'suffix' => null,
+                'birthday' => '2003-03-26',
+                'employment_type' => 'Regular',
+                'department_code' => 'FAD',
+                'position' => 'Senior Accounting Staff',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2025-09-29',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09772994005',
+            ],
+            [
+                'emp_id' => 1014, // company ID 52
+                'firstname' => 'John Carl',
+                'middlename' => 'Dandan',
+                'lastname' => 'Murillo',
+                'suffix' => null,
+                'birthday' => '1994-10-08',
+                'employment_type' => 'Probationary',
+                'department_code' => 'RWS',
+                'position' => 'Systems Developer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-08-23',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09854586073',
+            ],
+            [
+                'emp_id' => 1015, // company ID 00-053
+                'firstname' => 'Ahadon',
+                'middlename' => 'Buladaco',
+                'lastname' => 'Caraing',
+                'suffix' => 'Jr.',
+                'birthday' => '2003-04-13',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWS',
+                'position' => 'Junior Technical Lead',
+                'rank' => 'Supervisory',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-03-09',
+                'date_of_latest_appointment' => '2026-09-30',
+                'mobile' => '0967406638',
+            ],
+            [
+                'emp_id' => 1016,
+                'firstname' => 'John Ross',
+                'middlename' => 'Saludares',
+                'lastname' => 'Guillermo',
+                'suffix' => null,
+                'birthday' => '2002-09-04',
+                'employment_type' => 'Regular',
+                'department_code' => 'RWS',
+                'position' => 'Graphic Designer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-01-06',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09663380831',
+            ],
+            [
+                'emp_id' => 1017, // company ID 55
+                'firstname' => 'Trisha',
+                'middlename' => 'Delima',
+                'lastname' => 'Rhom',
+                'suffix' => null,
+                'birthday' => '2002-09-20',
+                'employment_type' => 'Probationary',
+                'department_code' => 'RWS',
+                'position' => 'Content Writer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-05-13',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09630705893',
+            ],
+            [
+                'emp_id' => 1018, // company ID 00056
+                'firstname' => 'Christian Paul',
+                'middlename' => 'Tomenlaco',
+                'lastname' => 'Manota',
+                'suffix' => null,
+                'birthday' => '2000-04-17',
+                'employment_type' => 'Probationary',
+                'department_code' => 'RWS',
+                'position' => 'Project Manager',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-08-03',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09913696376',
+            ],
+            [
+                'emp_id' => 1019,
+                'firstname' => 'Charles',
+                'middlename' => 'Simblante',
+                'lastname' => 'Evangelio',
+                'suffix' => 'Jr.',
+                'birthday' => '2004-02-07',
+                'employment_type' => 'Probationary',
+                'department_code' => 'RWS',
+                'position' => 'Full Stack Developer',
+                'rank' => 'Staff/Rank & File',
+                'location' => 'DAVAO-HO',
+                'date_hired' => '2026-09-07',
+                'date_of_latest_appointment' => '2026-09-01',
+                'mobile' => '09071774381',
             ],
         ];
     }
