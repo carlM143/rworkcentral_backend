@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\User;
 use App\Notifications\SystemNotification;
 use App\Support\DepartmentHead;
+use App\Support\DepartmentRequestApprovals;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -40,6 +41,22 @@ class DepartmentHeadApprovalObserver
 
     public function created(Model $request): void
     {
+        $type = match ($request->getTable()) {
+            'leave_requests' => 'leave',
+            'overtime_requests' => 'overtime',
+            'undertime_requests' => 'undertime',
+            'work_from_home' => 'wfh',
+            default => null,
+        };
+        if ($type && request()?->is('api/employee/*') && $request->status === 'pending') {
+            DB::transaction(function () use ($type, $request) {
+                $row = DB::table($request->getTable())->where('id', $request->id)->lockForUpdate()->first();
+                DepartmentRequestApprovals::initialize($type, $row);
+                $request->dept_head_id = null;
+                $request->dept_head_status = DepartmentRequestApprovals::records($type, $request->id)->exists() ? 'pending' : 'skipped';
+                $request->saveQuietly();
+            });
+        }
         if ($request->dept_head_status !== 'pending') {
             return;
         }
@@ -48,9 +65,11 @@ class DepartmentHeadApprovalObserver
         $employee = DB::table('employees')->where('id', $request->employee_id)->first(['firstname', 'lastname', 'user_id']);
         $name = $employee ? trim($employee->firstname.' '.$employee->lastname) : 'An employee';
 
-        $recipients = $request->dept_head_id
+        $recipients = $type
+            ? DepartmentRequestApprovals::records($type, $request->id)->pluck('user_id')->map(fn ($id) => (int) $id)->all()
+            : ($request->dept_head_id
             ? [(int) $request->dept_head_id]
-            : array_diff(DepartmentHead::supervisorUserIds(), [(int) ($employee->user_id ?? 0)]);
+            : array_diff(DepartmentHead::supervisorUserIds(), [(int) ($employee->user_id ?? 0)]));
 
         $this->notify($recipients, [
             'category' => 'request',

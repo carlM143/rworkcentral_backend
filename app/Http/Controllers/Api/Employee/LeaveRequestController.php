@@ -490,6 +490,16 @@ class LeaveRequestController extends Controller
 
     private function formatLeaveRequest(LeaveRequest $request): array
     {
+        $approvals = \App\Support\DepartmentRequestApprovals::records('leave', $request->id)
+            ->orderBy('id')->get(['department_id', 'approver_name', 'approver_position', 'status', 'acted_at']);
+        $departmentId = $approvals->first()?->department_id
+            ?? \App\Support\DepartmentHead::departmentOf((int) $request->employee_id);
+        $hrStatus = match ($request->status) {
+            'approved' => 'approved',
+            'cancelled' => 'cancelled',
+            'rejected' => $request->approved_by ? 'rejected' : 'not_required',
+            default => $request->dept_head_status === 'pending' ? 'waiting_for_department' : 'pending',
+        };
         $dates = $request->leaveDates->sortBy('leave_date')->values();
         $fileUrl = $request->file_path
             ? (str_starts_with($request->file_path, 'http')
@@ -500,6 +510,13 @@ class LeaveRequestController extends Controller
         return [
             'id' => $request->request_no ?: ('LR-'.$request->id),
             'raw_id' => $request->id,
+            'approval_department' => DB::table('departments')->where('id', $departmentId)->value('department_name'),
+            'department_approvals' => $approvals,
+            'department_approval_status' => $request->dept_head_status,
+            'hr_approval' => [
+                'status' => $hrStatus,
+                'name' => \App\Support\DepartmentHead::nameOfUser($request->approved_by ? (int) $request->approved_by : null),
+            ],
             'request_no' => $request->request_no,
             'category' => 'Leave',
             'type' => $request->leaveType?->leave_name ?? 'Unknown Leave Type',

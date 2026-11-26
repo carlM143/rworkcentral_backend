@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\NotificationService;
 use App\Support\DepartmentHead;
+use App\Support\DepartmentRequestApprovals;
 use App\Support\PrivilegeCatalog;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -48,6 +49,24 @@ class SupervisorApprovalController extends Controller
         $departments = DepartmentHead::departmentsHeadedBy($userId);
         $tab = $validated['tab'] ?? 'pending';
         $types = ($validated['type'] ?? 'all') === 'all' ? self::TYPES : [$validated['type']];
+
+        // Bootstrap pending requests filed before per-person tracking was enabled.
+        foreach (self::TABLES as $type => $table) {
+            DB::table($table)->where('status', 'pending')->orderBy('id')->chunkById(100, function ($rows) use ($type, $table) {
+                foreach ($rows as $row) {
+                    DB::transaction(function () use ($type, $table, $row) {
+                        $locked = DB::table($table)->where('id', $row->id)->lockForUpdate()->first();
+                        if ($locked && $locked->status === 'pending'
+                            && ($type === 'oba' || $locked->dept_head_status === 'pending')) {
+                            DepartmentRequestApprovals::initialize($type, $locked);
+                            if ($type !== 'oba' && DepartmentRequestApprovals::records($type, $locked->id)->exists()) {
+                                DB::table($table)->where('id', $locked->id)->update(['dept_head_status' => 'pending']);
+                            }
+                        }
+                    });
+                }
+            });
+        }
 
         $items = collect($types)
             ->flatMap(fn (string $type) => $this->items($type, $userId, $tab))
@@ -169,18 +188,19 @@ class SupervisorApprovalController extends Controller
         abort_unless(in_array($type, self::TYPES, true), 404);
 
         $userId = (int) $request->user()->id;
-        $seeAll = PrivilegeCatalog::isAdminRole($request->user()->role?->name);
         $table = self::TABLES[$type];
 
-        $row = DB::transaction(function () use ($type, $table, $id, $userId, $seeAll, $approve, $remarks) {
+        $complete = false;
+        $row = DB::transaction(function () use ($type, $table, $id, $userId, $approve, $remarks, &$complete, $request) {
             $row = DB::table($table)->where('id', $id)->lockForUpdate()->first();
 
             abort_unless($row, 404, 'Request not found.');
-            abort_unless(
-                $seeAll || ! $row->dept_head_id || (int) $row->dept_head_id === $userId,
-                403,
-                'This request is assigned to another supervisor.'
-            );
+            DepartmentRequestApprovals::initialize($type, $row);
+            abort_unless($request->user()->hasPrivilege('approvals', 'first_level.view')
+                && $request->user()->hasPrivilege('approvals', 'first_level.approve'), 403);
+            $decision = DepartmentRequestApprovals::records($type, $id)->where('user_id', $userId)->first();
+            abort_unless($decision, 403, 'You are not an assigned approver for this request.');
+            abort_unless($decision->status === 'pending', 422, 'You have already acted on this request.');
             abort_if(
                 (int) DB::table('employees')->where('id', $row->employee_id)->value('user_id') === $userId,
                 403,
@@ -193,6 +213,15 @@ class SupervisorApprovalController extends Controller
 
             if (! $isPending) {
                 throw ValidationException::withMessages(['status' => 'This request was already acted on.']);
+            }
+
+            DepartmentRequestApprovals::records($type, $id)->where('id', $decision->id)->update([
+                'status' => $approve ? 'approved' : 'rejected',
+                'acted_at' => now(), 'remarks' => $remarks, 'updated_at' => now(),
+            ]);
+            $complete = ! DepartmentRequestApprovals::records($type, $id)->where('status', '!=', 'approved')->exists();
+            if ($approve && ! $complete) {
+                return $row;
             }
 
             $changes = $type === 'oba'
@@ -215,14 +244,17 @@ class SupervisorApprovalController extends Controller
             return $row;
         });
 
-        $this->notifyAfter($type, $row, $approve, $remarks, $userId);
+        if (! $approve || $complete) {
+            $this->notifyAfter($type, $row, $approve, $remarks, $userId);
+        }
 
         $label = self::LABELS[$type];
 
         return response()->json([
             'success' => true,
             'message' => $approve
-                ? "{$label} request approved. It now goes to HR for final approval."
+                ? ($complete ? "{$label} request approved by all department approvers. It now goes to HR."
+                    : 'Your approval was recorded. Waiting for the other department approvers.')
                 : "{$label} request rejected.",
             'data' => null,
         ]);
@@ -278,7 +310,8 @@ class SupervisorApprovalController extends Controller
         $ownEmployeeId = DB::table('employees')->where('user_id', $userId)->value('id');
 
         $query = DB::table(self::TABLES[$type])
-            ->when(! $this->seeAll, fn ($q) => $q->where(fn ($w) => $w->whereNull('dept_head_id')->orWhere('dept_head_id', $userId)))
+            ->whereIn('id', DB::table('department_request_approvals')->select('request_id')
+                ->where('request_type', $type)->where('user_id', $userId)->where('status', 'pending'))
             ->when($ownEmployeeId, fn ($q) => $q->where('employee_id', '!=', $ownEmployeeId));
 
         return $type === 'oba'
@@ -293,12 +326,8 @@ class SupervisorApprovalController extends Controller
         $query = $tab === 'pending'
             ? $this->pendingQuery($type, $userId)
             : DB::table($table)
-                ->when(! $this->seeAll, fn ($q) => $q->where('dept_head_id', $userId))
-                ->when(
-                    $type === 'oba',
-                    fn ($q) => $q->whereNotNull('dept_head_acted_at'),
-                    fn ($q) => $q->whereIn('dept_head_status', ['approved', 'rejected', 'overridden']),
-                )
+                ->whereIn('id', DB::table('department_request_approvals')->select('request_id')
+                    ->where('request_type', $type)->where('user_id', $userId)->whereIn('status', ['approved', 'rejected']))
                 ->orderByDesc('dept_head_acted_at')
                 ->limit(50);
 
@@ -320,6 +349,8 @@ class SupervisorApprovalController extends Controller
 
             return [
                 'type' => $type,
+                'department_approvals' => DepartmentRequestApprovals::records($type, $row->id)
+                    ->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
                 'type_label' => self::LABELS[$type],
                 'id' => $row->id,
                 'request_no' => $row->request_no ?? ('OBA-'.str_pad((string) $row->id, 4, '0', STR_PAD_LEFT)),

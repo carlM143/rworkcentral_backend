@@ -193,7 +193,8 @@ return [
             'label' => 'Departments',
             'icon' => 'briefcase',
             'features' => [
-                'departments' => ['label' => 'Departments', 'actions' => ['view', 'create', 'edit', 'delete'], 'notes' => 'Edit also opens Department Heads.'],
+                'departments' => ['label' => 'Departments', 'actions' => ['view', 'create', 'edit', 'delete']],
+                'request_approvers' => ['label' => 'Request Approvers', 'actions' => ['view', 'edit'], 'notes' => 'View department approvers. Edit assigns or removes approvers.'],
                 'positions' => ['label' => 'Positions', 'actions' => ['view', 'create', 'edit', 'delete']],
                 'employment_types' => ['label' => 'Employment Types', 'actions' => ['view', 'create', 'edit', 'delete']],
             ],

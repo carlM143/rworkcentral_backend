@@ -219,6 +219,11 @@ class UndertimeRequestController extends Controller
         return [
             'id' => $ut->request_no ?: ('UT-' . $ut->id),
             'raw_id' => $ut->id,
+            'department_approvals' => \App\Support\DepartmentRequestApprovals::records('undertime', $ut->id)
+                ->orderBy('id')->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
+            'department_approval_status' => $ut->dept_head_status,
+            'reviewed_by' => \App\Support\DepartmentHead::nameOfUser($ut->approved_by ? (int) $ut->approved_by : null),
+            'reviewed_at' => $ut->approved_at,
             'request_no' => $ut->request_no,
             'category' => 'Undertime',
             'type' => 'Undertime',

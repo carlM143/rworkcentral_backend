@@ -212,6 +212,11 @@ class OvertimeRequestController extends Controller
         return [
             'id' => $ot->request_no ?: ('OT-' . $ot->id),
             'raw_id' => $ot->id,
+            'department_approvals' => \App\Support\DepartmentRequestApprovals::records('overtime', $ot->id)
+                ->orderBy('id')->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
+            'department_approval_status' => $ot->dept_head_status,
+            'reviewed_by' => \App\Support\DepartmentHead::nameOfUser($ot->approved_by ? (int) $ot->approved_by : null),
+            'reviewed_at' => $ot->approved_at,
             'request_no' => $ot->request_no,
             'category' => 'Overtime',
             'type' => 'Overtime',

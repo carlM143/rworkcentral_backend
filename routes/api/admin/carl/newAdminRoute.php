@@ -20,7 +20,6 @@ use App\Http\Controllers\Api\Admin\RegionalRateController;
 use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\SupervisorApprovalController;
-use App\Http\Controllers\Api\Admin\DepartmentHeadController;
 use App\Http\Controllers\Api\Admin\WageComplianceController;
 use App\Http\Controllers\Api\Admin\PayrollReportController;
 use App\Http\Controllers\Api\Admin\ContributionReportController;
@@ -199,13 +198,6 @@ Route::get('supervisor-approvals/approvers', [SupervisorApprovalController::clas
 Route::patch('supervisor-approvals/{type}/{id}/override', [SupervisorApprovalController::class, 'override'])
     ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
 
-
-// ============================================
-// DEPARTMENTS: DEPARTMENT HEADS
-// ============================================
-
-Route::get('department-heads', [DepartmentHeadController::class, 'index']);
-Route::patch('department-heads/{department}', [DepartmentHeadController::class, 'update']);    
 
 // ============================================
 // REPORTS: WAGE COMPLIANCE

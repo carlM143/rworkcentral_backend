@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\EvaluationTemplateCategoryController;
 use App\Http\Controllers\Api\Admin\EvaluationTemplateController;
+use App\Http\Controllers\Api\Admin\DepartmentApproverController;
 use App\Http\Controllers\Api\Admin\LifecycleConfigurationController;
 use App\Http\Controllers\Api\Admin\LifecycleEvaluationDocumentController;
 use App\Http\Controllers\Api\Admin\LifecycleWorkflowController;
@@ -49,3 +50,9 @@ Route::get('evaluation-template-categories', [EvaluationTemplateCategoryControll
 Route::post('evaluation-template-categories', [EvaluationTemplateCategoryController::class, 'store']);
 Route::put('evaluation-template-categories/{category}', [EvaluationTemplateCategoryController::class, 'update']);
 Route::delete('evaluation-template-categories/{category}', [EvaluationTemplateCategoryController::class, 'destroy']);
+
+// Department request approvers
+Route::get('departments/{department}/approvers', [DepartmentApproverController::class, 'index'])
+    ->middleware('privilege:departments,request_approvers.view');
+Route::put('departments/{department}/approvers', [DepartmentApproverController::class, 'update'])
+    ->middleware('privilege:departments,request_approvers.edit');
