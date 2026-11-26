@@ -21,7 +21,7 @@ class UserSeeder extends Seeder
                 'role_id' => $administratorRole->id,
                 'name' => 'System Administrator',
                 'email' => 'admin@rworkcentral.test',
-                'password' => 'password',
+                'password' => 'password123',
                 'email_verified_at' => now(),
             ],
             [

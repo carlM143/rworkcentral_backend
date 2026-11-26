@@ -124,10 +124,10 @@ class DashboardPayrollController extends Controller
         return match (true) {
             $status === 'draft' => ['label' => 'Open the payroll period', 'url' => '/admin/payroll/payroll-period'],
             $status === 'open' && $generated === 0 => ['label' => 'Check readiness and generate payroll', 'url' => '/admin/payroll/payroll-readiness'],
-            $status === 'open' => ['label' => 'Review the generated payroll', 'url' => '/admin/employee-payroll'],
-            $status === 'processing' => ['label' => 'Review and finalize payroll', 'url' => '/admin/employee-payroll'],
-            $status === 'closed' && ! $paid => ['label' => 'Release payslips on payday', 'url' => '/admin/payroll-payslips'],
-            default => ['label' => 'View payroll history', 'url' => '/admin/payroll-history'],
+            $status === 'open' => ['label' => 'Review the generated payroll', 'url' => '/admin/payroll/employee-payroll'],
+            $status === 'processing' => ['label' => 'Review and finalize payroll', 'url' => '/admin/payroll/employee-payroll'],
+            $status === 'closed' && ! $paid => ['label' => 'Release payslips on payday', 'url' => '/admin/payroll/employee-payroll'],
+            default => ['label' => 'View payroll history', 'url' => '/admin/payroll/payroll-history'],
         };
     }
 
