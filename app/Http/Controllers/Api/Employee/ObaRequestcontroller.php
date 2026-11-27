@@ -66,15 +66,6 @@ class ObaRequestcontroller extends Controller
             'images.*' => ['image', 'mimes:jpg,jpeg,png', 'max:5120'],
         ]);
 
-        $headUserId = $employee->department?->admin_id;
-
-        if (! $headUserId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Your department has no department head assigned. Please contact HR.',
-            ], 422);
-        }
-
         $timeFrom = Carbon::createFromFormat('Y-m-d H:i', $validated['date_request'].' '.$validated['time_from']);
         $timeTo = Carbon::createFromFormat('Y-m-d H:i', $validated['date_request'].' '.$validated['time_to']);
 
@@ -89,9 +80,6 @@ class ObaRequestcontroller extends Controller
             ], 422);
         }
 
-        // If the filer is the department head, their own signature step is already done.
-        $headIsFiler = (int) $headUserId === (int) $employee->user_id;
-
         $storedPaths = [];
 
         try {
@@ -102,23 +90,24 @@ class ObaRequestcontroller extends Controller
                 $employeeIds,
                 $timeFrom,
                 $timeTo,
-                $headUserId,
-                $headIsFiler,
                 &$storedPaths
             ) {
                 $obaRequest = ObaRequest::create([
                     'employee_id' => $employee->id,
-                    'dept_head_id' => $headUserId,
-                    'dept_head_acted_at' => $headIsFiler ? now() : null,
+                    'dept_head_id' => null,
+                    'dept_head_acted_at' => null,
                     'reason' => $validated['reason'],
                     'destination' => $validated['destination'],
                     'time_from' => $timeFrom,
                     'time_to' => $timeTo,
                     'date_request' => $validated['date_request'],
-                    'status' => $headIsFiler
-                        ? ObaRequest::STATUS_DEPT_HEAD_APPROVED
-                        : ObaRequest::STATUS_PENDING,
+                    'status' => ObaRequest::STATUS_PENDING,
                 ]);
+
+                \App\Support\DepartmentRequestApprovals::initialize('oba', (object) $obaRequest->getAttributes());
+                if (! \App\Support\DepartmentRequestApprovals::records('oba', $obaRequest->id)->exists()) {
+                    $obaRequest->update(['status' => ObaRequest::STATUS_DEPT_HEAD_APPROVED]);
+                }
 
                 Employee::whereIn('id', $employeeIds)
                     ->get(['id', 'firstname', 'lastname'])

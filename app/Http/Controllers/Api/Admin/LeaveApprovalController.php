@@ -704,6 +704,8 @@ class LeaveApprovalController extends Controller
             // Supervisor (first-level) approval, for the "Supervisor" column
             'dept_head_status' => $request->dept_head_status ?? 'skipped',
             'dept_head_id' => $request->dept_head_id,
+            'department_approvals' => \App\Support\DepartmentRequestApprovals::records('leave', $request->id)
+                ->orderBy('id')->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
 
             'employee' => [
                 'id' => $request->employee?->id,

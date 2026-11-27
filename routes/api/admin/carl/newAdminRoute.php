@@ -20,7 +20,6 @@ use App\Http\Controllers\Api\Admin\RegionalRateController;
 use App\Http\Controllers\Api\Admin\SalaryAdjustmentController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\SupervisorApprovalController;
-use App\Http\Controllers\Api\Admin\DepartmentHeadController;
 use App\Http\Controllers\Api\Admin\WageComplianceController;
 use App\Http\Controllers\Api\Admin\PayrollReportController;
 use App\Http\Controllers\Api\Admin\ContributionReportController;
@@ -194,13 +193,6 @@ Route::patch('supervisor-approvals/{type}/{id}/override', [SupervisorApprovalCon
 
 
 // ============================================
-// DEPARTMENTS: DEPARTMENT HEADS
-// ============================================
-
-Route::get('department-heads', [DepartmentHeadController::class, 'index']);
-Route::patch('department-heads/{department}', [DepartmentHeadController::class, 'update']);    
-
-// ============================================
 // REPORTS: WAGE COMPLIANCE
 // ============================================
 
@@ -235,27 +227,3 @@ Route::get('reports/thirteenth-month', [ThirteenthMonthReportController::class, 
 
 Route::get('reports/summary', [ReportSummaryController::class, 'index'])
     ->middleware('privilege:reports,center.view');    
-
-// ============================================
-// PAYROLL: WITHHOLDING TAX (BIR)
-// ============================================
-
-Route::get('withholding-tax', [WithholdingTaxController::class, 'index'])
-    ->middleware('privilege:payroll,withholding_tax.view');
-Route::post('withholding-tax/calculate', [WithholdingTaxController::class, 'calculate'])
-    ->middleware('privilege:payroll,withholding_tax.view');
-Route::post('withholding-tax/tables', [WithholdingTaxController::class, 'store'])
-    ->middleware('privilege:payroll,withholding_tax.edit');
-Route::put('withholding-tax/tables/{id}', [WithholdingTaxController::class, 'update'])
-    ->middleware('privilege:payroll,withholding_tax.edit')->whereNumber('id');
-Route::delete('withholding-tax/tables/{id}', [WithholdingTaxController::class, 'destroy'])
-    ->middleware('privilege:payroll,withholding_tax.edit')->whereNumber('id');
-Route::put('withholding-tax/settings', [WithholdingTaxController::class, 'updateSettings'])
-    ->middleware('privilege:payroll,withholding_tax.edit');
-
-// ============================================
-// REPORTS: WITHHOLDING TAX (BIR 1601-C)
-// ============================================
-
-Route::get('reports/withholding-tax', [WithholdingTaxReportController::class, 'index'])
-    ->middleware('privilege:reports,withholding_tax.view');

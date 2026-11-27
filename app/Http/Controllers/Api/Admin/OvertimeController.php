@@ -22,6 +22,9 @@ class OvertimeController extends Controller
             ->get();
 
         $requests->each(fn (OvertimeRequest $overtimeRequest) => $this->appendCurrentPosition($overtimeRequest));
+        $approvals = DB::table('department_request_approvals')->where('request_type', 'overtime')
+            ->whereIn('request_id', $requests->modelKeys())->orderBy('id')->get()->groupBy('request_id');
+        $requests->each(fn ($record) => $record->setAttribute('department_approvals', $approvals->get($record->id, collect())));
 
         return response()->json([
             'success' => true,
