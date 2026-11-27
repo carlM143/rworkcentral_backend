@@ -205,6 +205,8 @@ return [
             'label' => 'Approval Center',
             'icon' => 'clipboard-check',
             'features' => [
+                'first_level' => ['label' => 'For My Approval', 'actions' => ['view', 'approve'], 'notes' => 'View and approve requests assigned to you as a department approver.'],
+                'department_override' => ['label' => 'Override Department Approval', 'actions' => ['approve'], 'notes' => 'Skip pending department approvals with a recorded reason. Final approval permission is also required.'],
                 'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
                 'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],

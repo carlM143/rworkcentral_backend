@@ -20,6 +20,7 @@ class SupervisorApprovalController extends Controller
 
     /** Administrators see every pending request. */
     private bool $seeAll = false;
+    private array $viewAllTypes = [];
 
     private const TABLES = [
         'leave' => 'leave_requests',
@@ -46,6 +47,16 @@ class SupervisorApprovalController extends Controller
 
         $userId = (int) $request->user()->id;
         $this->seeAll = PrivilegeCatalog::isAdminRole($request->user()->role?->name);
+        foreach (self::TYPES as $requestType) {
+            [$module, $permission] = match ($requestType) {
+                'leave' => ['approvals', 'leaves.view'],
+                'overtime' => ['approvals', 'overtime.view'],
+                'undertime' => ['approvals', 'undertime.view'],
+                'wfh' => ['wfh', 'requests.view'],
+                'oba' => ['approvals', 'oba.view'],
+            };
+            $this->viewAllTypes[$requestType] = $request->user()->hasPrivilege($module, $permission);
+        }
         $departments = DepartmentHead::departmentsHeadedBy($userId);
         $tab = $validated['tab'] ?? 'pending';
         $types = ($validated['type'] ?? 'all') === 'all' ? self::TYPES : [$validated['type']];
@@ -87,7 +98,7 @@ class SupervisorApprovalController extends Controller
             'data' => $items,
             'is_department_head' => true,
             'departments' => $departments->pluck('department_name')->values(),
-            'sees_all' => $this->seeAll,
+            'sees_all' => $this->seeAll || in_array(true, $this->viewAllTypes, true),
             'counts' => $counts->all() + ['total' => $counts->sum()],
         ]);
     }
@@ -147,11 +158,14 @@ class SupervisorApprovalController extends Controller
             'oba' => ['approvals', 'oba.approve'],
         };
         abort_unless($request->user()->hasPrivilege($module, $privilege), 403, 'You cannot give the final approval for this request.');
+        abort_unless($request->user()->hasPrivilege('approvals', 'department_override.approve'), 403, 'You cannot override department approval.');
+        $validated = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
 
         $table = self::TABLES[$type];
         $hr = $request->user()->name;
+        $reason = $validated['reason'];
 
-        DB::transaction(function () use ($type, $table, $id, $hr) {
+        DB::transaction(function () use ($type, $table, $id, $hr, $reason) {
             $row = DB::table($table)->where('id', $id)->lockForUpdate()->first();
             abort_unless($row, 404, 'Request not found.');
 
@@ -163,18 +177,22 @@ class SupervisorApprovalController extends Controller
                 throw ValidationException::withMessages(['status' => 'This request is no longer waiting for a supervisor.']);
             }
 
+            DepartmentRequestApprovals::records($type, $id)->where('status', 'pending')->update([
+                'status' => 'overridden', 'acted_at' => now(),
+                'remarks' => "Overridden by {$hr}: {$reason}", 'updated_at' => now(),
+            ]);
             DB::table($table)->where('id', $id)->update(($type === 'oba'
                 ? ['status' => 'dept_head_approved', 'dept_head_acted_at' => now()]
                 : [
                     'dept_head_status' => 'overridden',
                     'dept_head_acted_at' => now(),
-                    'dept_head_remarks' => "Supervisor step skipped by {$hr}.",
+                    'dept_head_remarks' => "Department approval overridden by {$hr}: {$reason}",
                 ]) + ['updated_at' => now()]);
         });
 
         return response()->json([
             'success' => true,
-            'message' => 'Supervisor step skipped. You can now approve the request.',
+            'message' => 'Department approval skipped. The request is ready for final approval.',
             'data' => null,
         ]);
     }
@@ -309,9 +327,12 @@ class SupervisorApprovalController extends Controller
         // A supervisor never approves their own request.
         $ownEmployeeId = DB::table('employees')->where('user_id', $userId)->value('id');
 
-        $query = DB::table(self::TABLES[$type])
-            ->whereIn('id', DB::table('department_request_approvals')->select('request_id')
-                ->where('request_type', $type)->where('user_id', $userId)->where('status', 'pending'))
+        $query = DB::table(self::TABLES[$type]);
+        if ($this->seeAll || ($this->viewAllTypes[$type] ?? false)) {
+            return $query->where('status', 'pending');
+        }
+        $query->whereIn('id', DB::table('department_request_approvals')->select('request_id')
+            ->where('request_type', $type)->where('user_id', $userId)->where('status', 'pending'))
             ->when($ownEmployeeId, fn ($q) => $q->where('employee_id', '!=', $ownEmployeeId));
 
         return $type === 'oba'
@@ -326,8 +347,17 @@ class SupervisorApprovalController extends Controller
         $query = $tab === 'pending'
             ? $this->pendingQuery($type, $userId)
             : DB::table($table)
-                ->whereIn('id', DB::table('department_request_approvals')->select('request_id')
-                    ->where('request_type', $type)->where('user_id', $userId)->whereIn('status', ['approved', 'rejected']))
+                ->when(! $this->seeAll && ! ($this->viewAllTypes[$type] ?? false),
+                    fn ($q) => $q->whereIn('id', DB::table('department_request_approvals')->select('request_id')
+                        ->where('request_type', $type)->where('user_id', $userId)->whereIn('status', ['approved', 'rejected'])),
+                    fn ($q) => $q->where(function ($q) use ($type) {
+                        $q->whereIn('status', ['approved', 'rejected', 'cancelled']);
+                        if ($type !== 'oba') {
+                            $q->orWhereIn('dept_head_status', ['approved', 'rejected', 'overridden']);
+                        } else {
+                            $q->orWhere('status', 'dept_head_approved');
+                        }
+                    }))
                 ->orderByDesc('dept_head_acted_at')
                 ->limit(50);
 
@@ -344,11 +374,16 @@ class SupervisorApprovalController extends Controller
 
         $details = $this->details($type, $rows);
 
-        return $rows->map(function ($row) use ($type, $employees, $details) {
+        return $rows->map(function ($row) use ($type, $employees, $details, $userId) {
             $employee = $employees->get($row->employee_id);
 
             return [
                 'type' => $type,
+                'can_act' => ($row->status === 'pending')
+                    && ($type === 'oba' || $row->dept_head_status === 'pending')
+                    && request()->user()->hasPrivilege('approvals', 'first_level.approve')
+                    && ((int) DB::table('employees')->where('id', $row->employee_id)->value('user_id') !== $userId)
+                    && DepartmentRequestApprovals::records($type, $row->id)->where('user_id', $userId)->where('status', 'pending')->exists(),
                 'department_approvals' => DepartmentRequestApprovals::records($type, $row->id)
                     ->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
                 'type_label' => self::LABELS[$type],

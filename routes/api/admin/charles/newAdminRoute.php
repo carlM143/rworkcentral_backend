@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\EvaluationTemplateCategoryController;
 use App\Http\Controllers\Api\Admin\EvaluationTemplateController;
 use App\Http\Controllers\Api\Admin\DepartmentApproverController;
+use App\Http\Controllers\Api\Admin\SupervisorApprovalController;
 use App\Http\Controllers\Api\Admin\LifecycleConfigurationController;
 use App\Http\Controllers\Api\Admin\LifecycleEvaluationDocumentController;
 use App\Http\Controllers\Api\Admin\LifecycleWorkflowController;
@@ -56,3 +57,13 @@ Route::get('departments/{department}/approvers', [DepartmentApproverController::
     ->middleware('privilege:departments,request_approvers.view');
 Route::put('departments/{department}/approvers', [DepartmentApproverController::class, 'update'])
     ->middleware('privilege:departments,request_approvers.edit');
+
+// Requests assigned to department approvers
+Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index'])
+    ->middleware('privilege:approvals,first_level.view');
+Route::patch('supervisor-approvals/{type}/{id}/approve', [SupervisorApprovalController::class, 'approve'])
+    ->middleware('privilege:approvals,first_level.approve')
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
+Route::patch('supervisor-approvals/{type}/{id}/reject', [SupervisorApprovalController::class, 'reject'])
+    ->middleware('privilege:approvals,first_level.approve')
+    ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');

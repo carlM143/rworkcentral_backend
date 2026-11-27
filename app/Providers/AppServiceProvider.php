@@ -55,10 +55,9 @@ class AppServiceProvider extends ServiceProvider
         // Supervisor (first-level) approval of employee requests:
         // requests filed in the employee portal go to the supervisor first,
         // then HR gives the final approval.
-        // Supervisor (For My Approval) step removed: requests go straight to HR.
-        // LeaveRequest::observe(DepartmentHeadApprovalObserver::class); // supervisor step removed
-        // OvertimeRequest::observe(DepartmentHeadApprovalObserver::class); // supervisor step removed
-        // UndertimeRequest::observe(DepartmentHeadApprovalObserver::class); // supervisor step removed
-        // WorkFromHome::observe(DepartmentHeadApprovalObserver::class); // supervisor step removed
+        LeaveRequest::observe(DepartmentHeadApprovalObserver::class);
+        OvertimeRequest::observe(DepartmentHeadApprovalObserver::class);
+        UndertimeRequest::observe(DepartmentHeadApprovalObserver::class);
+        WorkFromHome::observe(DepartmentHeadApprovalObserver::class);
     }
 }
