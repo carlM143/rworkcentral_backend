@@ -15,6 +15,7 @@ class ObaRequestcontroller extends Controller
         'images',
         'filer:id,firstname,lastname,department_id',
         'filer.department:id,department_name',
+        'approver:id,name',
     ];
 
     // GET /admin/oba-requests?status=&department_id=&search=&date_from=&date_to=&per_page=
@@ -179,6 +180,23 @@ class ObaRequestcontroller extends Controller
             $filer ? trim($filer->firstname.' '.$filer->lastname) : null
         );
         $obaRequest->setAttribute('department_name', $filer?->department?->department_name);
+
+        $approvals = \App\Support\DepartmentRequestApprovals::records('oba', $obaRequest->id)
+            ->orderBy('id')
+            ->get(['user_id', 'approver_name', 'approver_position', 'status', 'acted_at', 'remarks']);
+        $obaRequest->setAttribute('department_approvals', $approvals);
+
+        $deptStatus = 'skipped';
+        if ($obaRequest->status === ObaRequest::STATUS_PENDING) {
+            $deptStatus = $approvals->isNotEmpty() ? 'pending' : 'skipped';
+        } elseif ($approvals->contains('status', 'overridden')) {
+            $deptStatus = 'overridden';
+        } elseif ($approvals->contains('status', 'rejected')) {
+            $deptStatus = 'rejected';
+        } elseif ($approvals->isNotEmpty()) {
+            $deptStatus = 'approved';
+        }
+        $obaRequest->setAttribute('dept_head_status', $deptStatus);
 
         return $obaRequest;
     }

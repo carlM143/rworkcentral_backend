@@ -82,6 +82,13 @@ class DepartmentHeadApprovalObserver
 
     public function updating(Model $request): void
     {
+        $deciding = $request->isDirty('status') && in_array($request->status, ['approved', 'rejected'], true);
+        if ($deciding && strtolower((string) auth()->user()?->role?->name) === 'supervisor') {
+            throw ValidationException::withMessages([
+                'status' => 'Supervisors can only perform department approval. Final approval is handled by HR.',
+            ]);
+        }
+
         $approving = $request->isDirty('status') && $request->status === 'approved';
 
         if (! $approving || $request->getOriginal('dept_head_status') !== 'pending') {

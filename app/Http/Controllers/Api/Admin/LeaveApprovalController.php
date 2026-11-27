@@ -21,9 +21,14 @@ class LeaveApprovalController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $this->authorizeApproval($request);
+        abort_unless($request->user()->hasPrivilege('approvals', 'leaves.view'), 403, 'You are not authorized to view leave requests.');
 
         $requests = LeaveRequest::query()
+            ->when(! $request->user()->hasPrivilege('approvals', 'leaves.approve'), function ($query) use ($request) {
+                $query->whereIn('id', DB::table('department_request_approvals')
+                    ->select('request_id')->where('request_type', 'leave')
+                    ->where('user_id', $request->user()->id));
+            })
 
             ->with([
                 'employee:id,emp_id,department_id,firstname,lastname',
@@ -705,7 +710,7 @@ class LeaveApprovalController extends Controller
             'dept_head_status' => $request->dept_head_status ?? 'skipped',
             'dept_head_id' => $request->dept_head_id,
             'department_approvals' => \App\Support\DepartmentRequestApprovals::records('leave', $request->id)
-                ->orderBy('id')->get(['approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
+                ->orderBy('id')->get(['user_id', 'approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
 
             'employee' => [
                 'id' => $request->employee?->id,
@@ -758,6 +763,7 @@ class LeaveApprovalController extends Controller
             'status' => $request->status,
             'approved_by' => $request->approved_by,
             'approver' => $request->approver,
+            'approver_name' => $request->approver?->name,
             'approved_at' => $request->approved_at?->toIso8601String(),
             'created_at' => $request->created_at?->toIso8601String(),
         ];
@@ -766,7 +772,7 @@ class LeaveApprovalController extends Controller
     private function authorizeApproval(Request $request): void
     {
         abort_unless(
-            in_array($request->user()?->role?->name, ['Administrator', 'Human Resources'], true),
+            $request->user()?->hasPrivilege('approvals', 'leaves.approve'),
             403,
             'You are not authorized to approve leave requests.'
         );

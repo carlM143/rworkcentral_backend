@@ -36,6 +36,7 @@ class UndertimeController extends Controller
 
     public function approve(Request $request, UndertimeRequest $undertimeRequest): JsonResponse
     {
+        abort_unless($request->user()->hasPrivilege('approvals', 'undertime.approve'), 403);
         $approved = DB::transaction(function () use ($request, $undertimeRequest): UndertimeRequest {
             $record = UndertimeRequest::query()
                 ->lockForUpdate()
@@ -79,6 +80,7 @@ class UndertimeController extends Controller
 
     public function reject(Request $request, UndertimeRequest $undertimeRequest): JsonResponse
     {
+        abort_unless($request->user()->hasPrivilege('approvals', 'undertime.approve'), 403);
         $rejected = DB::transaction(function () use ($request, $undertimeRequest): UndertimeRequest {
             $record = UndertimeRequest::query()
                 ->lockForUpdate()

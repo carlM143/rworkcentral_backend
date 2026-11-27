@@ -58,19 +58,15 @@ class DepartmentHead
 
     public static function supervisorUserIds(): array
     {
-        static $ids = null;
-
-        return $ids ??= DB::table('users')
-            ->join('roles', 'roles.id', '=', 'users.role_id')
-            ->join('role_privileges', 'role_privileges.role_id', '=', 'roles.id')
-            ->join('privileges', 'privileges.id', '=', 'role_privileges.privilege_id')
-            ->where('privileges.module', 'approvals')
-            ->where('privileges.name', 'first_level.approve')
-            ->whereRaw('LOWER(roles.name) <> ?', ['administrator'])
-            ->distinct()
-            ->pluck('users.id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
+        return \App\Models\User::whereIn('id', DB::table('department_approvers')
+            ->join('employees', 'employees.id', '=', 'department_approvers.employee_id')
+            ->where('employees.status', true)->pluck('employees.user_id'))
+            ->get()->filter(function ($user) {
+                foreach (['leave', 'overtime', 'undertime', 'oba', 'wfh'] as $type) {
+                    if (DepartmentRequestApprovals::canApprove($user, $type)) return true;
+                }
+                return false;
+            })->pluck('id')->all();
     }
 
     public static function nameOfUser(?int $userId): ?string

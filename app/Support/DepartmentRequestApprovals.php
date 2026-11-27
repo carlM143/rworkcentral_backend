@@ -7,6 +7,20 @@ use Illuminate\Support\Facades\DB;
 
 class DepartmentRequestApprovals
 {
+    public static function canApprove(User $user, string $type): bool
+    {
+        [$module, $feature] = match ($type) {
+            'leave' => ['approvals', 'leaves'],
+            'overtime' => ['approvals', 'overtime'],
+            'undertime' => ['approvals', 'undertime'],
+            'oba' => ['approvals', 'oba'],
+            'wfh' => ['wfh', 'requests'],
+            default => [null, null],
+        };
+        return $module !== null && $user->hasPrivilege($module, "{$feature}.view")
+            && ($user->hasPrivilege($module, "{$feature}.edit") || $user->hasPrivilege($module, "{$feature}.approve"));
+    }
+
     public static function records(string $type, int $id)
     {
         return DB::table('department_request_approvals')->where('request_type', $type)->where('request_id', $id);
@@ -27,8 +41,7 @@ class DepartmentRequestApprovals
             ->get(['employees.id', 'employees.user_id', 'employees.firstname', 'employees.lastname']);
         foreach ($employees as $employee) {
             $user = User::find($employee->user_id);
-            if (! $user || ! $user->hasPrivilege('approvals', 'first_level.view')
-                || ! $user->hasPrivilege('approvals', 'first_level.approve')
+            if (! $user || ! self::canApprove($user, $type)
                 || DepartmentHead::departmentOf((int) $employee->id) !== $department) {
                 continue;
             }

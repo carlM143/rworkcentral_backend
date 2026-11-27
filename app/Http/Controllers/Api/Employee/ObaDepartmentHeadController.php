@@ -16,7 +16,7 @@ class ObaDepartmentHeadController extends Controller
 
         abort_unless($user, 401, 'Unauthenticated.');
 
-        $isHead = $user->hasPrivilege('approvals', 'first_level.view') && $user->hasPrivilege('approvals', 'first_level.approve');
+        $isHead = \App\Support\DepartmentRequestApprovals::canApprove($user, 'oba');
 
         $requests = $isHead
             ? ObaRequest::with(['obaEmployees', 'images', 'filer:id,firstname,lastname'])

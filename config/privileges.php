@@ -205,12 +205,11 @@ return [
             'label' => 'Approval Center',
             'icon' => 'clipboard-check',
             'features' => [
-                'first_level' => ['label' => 'For My Approval', 'actions' => ['view', 'approve'], 'notes' => 'View and approve requests assigned to you as a department approver.'],
                 'department_override' => ['label' => 'Override Department Approval', 'actions' => ['approve'], 'notes' => 'Skip pending department approvals with a recorded reason. Final approval permission is also required.'],
-                'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
-                'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
-                'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
-                'oba' => ['label' => 'OBA Approvals', 'actions' => ['view', 'approve'], 'notes' => 'Approve = final (HR) approval.'],
+                'leaves' => ['label' => 'Leave Approvals', 'actions' => ['view', 'edit', 'approve'], 'notes' => 'Edit = assigned department approval. Approve = final HR approval.'],
+                'overtime' => ['label' => 'Overtime Approvals', 'actions' => ['view', 'edit', 'approve'], 'notes' => 'Edit = assigned department approval. Approve = final HR approval.'],
+                'undertime' => ['label' => 'Undertime Approvals', 'actions' => ['view', 'edit', 'approve'], 'notes' => 'Edit = assigned department approval. Approve = final HR approval.'],
+                'oba' => ['label' => 'OBA Approvals', 'actions' => ['view', 'edit', 'approve'], 'notes' => 'Edit = assigned department approval. Approve = final HR approval.'],
             ],
         ],
 
@@ -218,7 +217,7 @@ return [
             'label' => 'Work From Home',
             'icon' => 'house',
             'features' => [
-                'requests' => ['label' => 'WFH Requests', 'actions' => ['view', 'create', 'approve']],
+                'requests' => ['label' => 'WFH Requests', 'actions' => ['view', 'create', 'edit', 'approve'], 'notes' => 'Edit = assigned department approval. Approve = final HR approval.'],
                 'documents' => ['label' => 'WFH Document Review', 'actions' => ['view', 'approve']],
             ],
         ],

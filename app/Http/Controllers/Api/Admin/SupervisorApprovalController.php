@@ -60,6 +60,8 @@ class SupervisorApprovalController extends Controller
         $departments = DepartmentHead::departmentsHeadedBy($userId);
         $tab = $validated['tab'] ?? 'pending';
         $types = ($validated['type'] ?? 'all') === 'all' ? self::TYPES : [$validated['type']];
+        $types = array_values(array_filter($types, fn ($type) => $this->viewAllTypes[$type] ?? false));
+        abort_unless(count($types), 403, 'You do not have access to these request modules.');
 
         // Bootstrap pending requests filed before per-person tracking was enabled.
         foreach (self::TABLES as $type => $table) {
@@ -89,7 +91,7 @@ class SupervisorApprovalController extends Controller
         }
 
         $counts = collect(self::TYPES)->mapWithKeys(fn (string $type) => [
-            $type => $this->pendingQuery($type, $userId)->count(),
+            $type => ($this->viewAllTypes[$type] ?? false) ? $this->pendingQuery($type, $userId)->count() : 0,
         ]);
 
         return response()->json([
@@ -214,8 +216,7 @@ class SupervisorApprovalController extends Controller
 
             abort_unless($row, 404, 'Request not found.');
             DepartmentRequestApprovals::initialize($type, $row);
-            abort_unless($request->user()->hasPrivilege('approvals', 'first_level.view')
-                && $request->user()->hasPrivilege('approvals', 'first_level.approve'), 403);
+            abort_unless(DepartmentRequestApprovals::canApprove($request->user(), $type), 403, 'Department approval requires View and Edit permission for this request module.');
             $decision = DepartmentRequestApprovals::records($type, $id)->where('user_id', $userId)->first();
             abort_unless($decision, 403, 'You are not an assigned approver for this request.');
             abort_unless($decision->status === 'pending', 422, 'You have already acted on this request.');
@@ -381,7 +382,7 @@ class SupervisorApprovalController extends Controller
                 'type' => $type,
                 'can_act' => ($row->status === 'pending')
                     && ($type === 'oba' || $row->dept_head_status === 'pending')
-                    && request()->user()->hasPrivilege('approvals', 'first_level.approve')
+                    && DepartmentRequestApprovals::canApprove(request()->user(), $type)
                     && ((int) DB::table('employees')->where('id', $row->employee_id)->value('user_id') !== $userId)
                     && DepartmentRequestApprovals::records($type, $row->id)->where('user_id', $userId)->where('status', 'pending')->exists(),
                 'department_approvals' => DepartmentRequestApprovals::records($type, $row->id)

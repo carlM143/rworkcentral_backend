@@ -59,11 +59,16 @@ Route::put('departments/{department}/approvers', [DepartmentApproverController::
     ->middleware('privilege:departments,request_approvers.edit');
 
 // Requests assigned to department approvers
-Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index'])
-    ->middleware('privilege:approvals,first_level.view');
+foreach (['leave' => 'leave-requests', 'overtime' => 'overtime-requests', 'undertime' => 'undertime-requests', 'oba' => 'oba-requests', 'wfh' => 'wfh-requests'] as $type => $resource) {
+    Route::patch("{$resource}/{id}/department-approve", function (\Illuminate\Http\Request $request, int $id) use ($type) {
+        return app(SupervisorApprovalController::class)->approve($request, $type, $id);
+    })->whereNumber('id');
+    Route::patch("{$resource}/{id}/department-reject", function (\Illuminate\Http\Request $request, int $id) use ($type) {
+        return app(SupervisorApprovalController::class)->reject($request, $type, $id);
+    })->whereNumber('id');
+}
+Route::get('supervisor-approvals', [SupervisorApprovalController::class, 'index']);
 Route::patch('supervisor-approvals/{type}/{id}/approve', [SupervisorApprovalController::class, 'approve'])
-    ->middleware('privilege:approvals,first_level.approve')
     ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');
 Route::patch('supervisor-approvals/{type}/{id}/reject', [SupervisorApprovalController::class, 'reject'])
-    ->middleware('privilege:approvals,first_level.approve')
     ->whereIn('type', ['leave', 'overtime', 'undertime', 'wfh', 'oba'])->whereNumber('id');

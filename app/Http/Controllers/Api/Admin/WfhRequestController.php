@@ -116,7 +116,7 @@ class WfhRequestController extends Controller
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'request_date' => ['nullable', 'date'],
-            'supervisor_name' => ['required', 'string', 'max:255'],
+            'supervisor_name' => ['nullable', 'string', 'max:255'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
@@ -153,6 +153,24 @@ class WfhRequestController extends Controller
                 ]);
             }
 
+            $supervisorName = trim((string) ($validated['supervisor_name'] ?? ''));
+            if ($supervisorName === '') {
+                $deptId = \App\Support\DepartmentHead::departmentOf((int) $employee->id);
+                $approverNames = $deptId
+                    ? DB::table('department_approvers as da')
+                        ->join('employees as e', 'e.id', '=', 'da.employee_id')
+                        ->where('da.department_id', $deptId)
+                        ->where('e.status', true)
+                        ->where('e.id', '!=', $employee->id)
+                        ->get(['e.firstname', 'e.lastname'])
+                        ->map(fn ($e) => trim($e->firstname.' '.$e->lastname))
+                        ->filter()
+                        ->values()
+                        ->all()
+                    : [];
+                $supervisorName = $approverNames ? implode(', ', $approverNames) : 'HR / Department Approver';
+            }
+
             return WorkFromHome::create([
                 'employee_id' => $employee->id,
                 'request_no' => $this->nextRequestNo($startDate),
@@ -160,7 +178,7 @@ class WfhRequestController extends Controller
                 'end_date' => $endDate,
                 'number_of_days' => $days,
                 'reason' => $validated['reason'],
-                'supervisor_name' => $validated['supervisor_name'],
+                'supervisor_name' => $supervisorName,
                 'request_date' => $validated['request_date'] ?? now()->toDateString(),
                 'status' => 'pending',
             ]);
@@ -406,6 +424,17 @@ class WfhRequestController extends Controller
 
         $hasData = ($attachmentsCount > 0) || ($submittedDays > 0) || ($acceptedDays > 0) || ($timeLogsCount > 0);
 
+        if ($wfh->status === 'pending'
+            && ($wfh->dept_head_status ?? 'skipped') === 'skipped'
+            && \App\Support\DepartmentRequestApprovals::records('wfh', $wfh->id)->doesntExist()
+        ) {
+            \App\Support\DepartmentRequestApprovals::initialize('wfh', $wfh);
+            if (\App\Support\DepartmentRequestApprovals::records('wfh', $wfh->id)->exists()) {
+                $wfh->dept_head_status = 'pending';
+                $wfh->saveQuietly();
+            }
+        }
+
         return [
             'id' => $wfh->id,
             'request_no' => $wfh->request_no,
@@ -425,6 +454,10 @@ class WfhRequestController extends Controller
             'request_date' => $wfh->request_date?->toDateString(),
             'remarks' => $wfh->remarks,
             'status' => $wfh->status,
+            'dept_head_status' => $wfh->dept_head_status ?? 'skipped',
+            'department_approvals' => \App\Support\DepartmentRequestApprovals::records('wfh', $wfh->id)
+                ->orderBy('id')
+                ->get(['user_id', 'approver_name', 'approver_position', 'status', 'acted_at', 'remarks']),
             'approved_by' => $wfh->approvedBy?->name,
             'approved_at' => $wfh->approved_at?->toDateString(),
             'counts' => [
