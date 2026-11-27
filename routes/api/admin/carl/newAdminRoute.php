@@ -226,4 +226,5 @@ Route::get('reports/thirteenth-month', [ThirteenthMonthReportController::class, 
 // ============================================
 
 Route::get('reports/summary', [ReportSummaryController::class, 'index'])
-    ->middleware('privilege:reports,center.view');    
+    ->middleware('privilege:reports,center.view');
+    
