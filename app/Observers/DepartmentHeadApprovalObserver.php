@@ -88,14 +88,6 @@ class DepartmentHeadApprovalObserver
             return;
         }
 
-        if (request()?->boolean('override')) {
-            $request->dept_head_status = 'overridden';
-            $request->dept_head_acted_at = now();
-            $request->dept_head_remarks = 'Approved by HR without the supervisor.';
-
-            return;
-        }
-
         $who = $request->dept_head_id
             ? (DepartmentHead::nameOfUser($request->dept_head_id) ?? 'the supervisor')
             : 'a supervisor';

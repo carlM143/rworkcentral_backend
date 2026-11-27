@@ -86,16 +86,16 @@ class ObaRequestcontroller extends Controller
     }
 
     // PATCH /admin/oba-requests/{obaRequest}/approve
-    // HR approval (no supervisor step: pending requests are approved directly).
+    // Final HR approval follows the department approval step.
     public function approve(Request $request, ObaRequest $obaRequest): JsonResponse
     {
         $this->authorizeHR($request);
 
-        $result = $this->act($obaRequest, [ObaRequest::STATUS_PENDING, ObaRequest::STATUS_DEPT_HEAD_APPROVED], [
+        $result = $this->act($obaRequest, [ObaRequest::STATUS_DEPT_HEAD_APPROVED], [
             'status' => ObaRequest::STATUS_APPROVED,
             'approved_by' => $request->user()->id,
             'rejection_reason' => null,
-        ], 'Only pending OBA requests can be approved.');
+        ], 'Department approval must be completed or overridden before HR approval.');
 
         if ($result instanceof JsonResponse) {
             return $result;
