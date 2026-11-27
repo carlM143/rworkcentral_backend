@@ -95,9 +95,9 @@ class EmployeeSeeder extends Seeder
                         'suffix' => $item['suffix'],
                         'profile_photo' => null,
                         'age' => Carbon::parse($item['birthday'])->age,
-                        'gender' => null,       // not in the client's list
+                        'gender' => null,       
                         'birthday' => $item['birthday'],
-                        'civil_status' => null, // not in the client's list
+                        'civil_status' => null, 
                         'status' => true,
                     ]
                 );
