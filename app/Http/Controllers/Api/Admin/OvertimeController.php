@@ -35,6 +35,7 @@ class OvertimeController extends Controller
 
     public function approve(Request $request, OvertimeRequest $overtimeRequest): JsonResponse
     {
+        abort_unless($request->user()->hasPrivilege('approvals', 'overtime.approve'), 403);
         $approved = DB::transaction(function () use ($request, $overtimeRequest): OvertimeRequest {
             $record = OvertimeRequest::query()
                 ->lockForUpdate()
@@ -72,6 +73,7 @@ class OvertimeController extends Controller
 
     public function reject(Request $request, OvertimeRequest $overtimeRequest): JsonResponse
     {
+        abort_unless($request->user()->hasPrivilege('approvals', 'overtime.approve'), 403);
         $rejected = DB::transaction(function () use ($request, $overtimeRequest): OvertimeRequest {
             $record = OvertimeRequest::query()
                 ->lockForUpdate()

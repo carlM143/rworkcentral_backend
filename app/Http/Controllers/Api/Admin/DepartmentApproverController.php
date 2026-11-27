@@ -65,7 +65,7 @@ class DepartmentApproverController extends Controller
         foreach ($employees as $employee) {
             if (! $this->isEligible((bool) $employee->status, $users->get($employee->user_id))) {
                 throw ValidationException::withMessages([
-                    'employee_ids' => 'Remove ineligible employees before saving. Approvers must be active and have both For My Approval permissions.',
+                    'employee_ids' => 'Approvers must be active and have View and Edit permissions for at least one request module.',
                 ]);
             }
         }
@@ -91,8 +91,10 @@ class DepartmentApproverController extends Controller
 
     private function isEligible(bool $active, ?User $user): bool
     {
-        return $active && $user !== null
-            && $user->hasPrivilege('approvals', 'first_level.view')
-            && $user->hasPrivilege('approvals', 'first_level.approve');
+        if (! $active || ! $user) return false;
+        foreach (['leave', 'overtime', 'undertime', 'oba', 'wfh'] as $type) {
+            if (\App\Support\DepartmentRequestApprovals::canApprove($user, $type)) return true;
+        }
+        return false;
     }
 }
